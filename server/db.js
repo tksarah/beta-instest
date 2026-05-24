@@ -40,6 +40,7 @@ db.serialize(() => {
       ['avatar_url', 'TEXT DEFAULT \'\'' ],
       ['auth_provider', "TEXT DEFAULT 'password'"],
       ['plan', "TEXT DEFAULT 'free_beta'"],
+      ['ai_generations_per_month_limit_override', 'INTEGER'],
       ['last_login_at', 'TEXT']
     ].filter(([name]) => !hasColumn(name));
     const createTeacherIndexes = () => {

@@ -94,6 +94,53 @@ function assert(cond, msg){
         assert(freeBetaPlan.limits && freeBetaPlan.limits.tests === updatedConfig.body.free_beta_limits.tests, 'free_beta test limit should match public config');
         assert(freeBetaPlan.limits && freeBetaPlan.limits.students === updatedConfig.body.free_beta_limits.students, 'free_beta student limit should match public config');
         assert(freeBetaPlan.limits && freeBetaPlan.limits.ai_generations_per_month === updatedConfig.body.free_beta_limits.ai_generations_per_month, 'free_beta AI limit should match public config');
+
+        const tempUsername = 'ai-limit-test-' + Date.now();
+        let tempTeacherId = null;
+        try{
+          const createdTeacher = await req(
+            'POST',
+            '/api/admin/teachers',
+            { 'X-Admin-Password': adminPassword },
+            { username: tempUsername, display_name: 'AI limit test', password: 'password123' }
+          );
+          assert(createdTeacher.status === 200, 'temporary teacher should be created');
+          tempTeacherId = createdTeacher.body && createdTeacher.body.id;
+          assert(tempTeacherId, 'temporary teacher id should be returned');
+
+          const setOverride = await req(
+            'PATCH',
+            '/api/admin/teachers/' + tempTeacherId,
+            { 'X-Admin-Password': adminPassword },
+            { ai_generations_per_month_limit_override: 7 }
+          );
+          assert(setOverride.status === 200, 'teacher AI generation override should be updateable');
+          assert(setOverride.body.ai_generations_per_month_limit_override === 7, 'teacher AI generation override should be echoed');
+          assert(setOverride.body.effective_limits && setOverride.body.effective_limits.ai_generations_per_month === 7, 'teacher effective AI generation limit should use override');
+          assert(setOverride.body.usage && Number.isInteger(setOverride.body.usage.ai_generations), 'teacher AI generation usage should be included');
+
+          const invalidOverride = await req(
+            'PATCH',
+            '/api/admin/teachers/' + tempTeacherId,
+            { 'X-Admin-Password': adminPassword },
+            { ai_generations_per_month_limit_override: '1.5' }
+          );
+          assert(invalidOverride.status === 400, 'teacher AI generation override should reject decimals');
+
+          const resetOverride = await req(
+            'PATCH',
+            '/api/admin/teachers/' + tempTeacherId,
+            { 'X-Admin-Password': adminPassword },
+            { ai_generations_per_month_limit_override: null }
+          );
+          assert(resetOverride.status === 200, 'teacher AI generation override should reset to plan default');
+          assert(resetOverride.body.ai_generations_per_month_limit_override === null, 'teacher AI generation override should reset to null');
+          assert(resetOverride.body.effective_limits && resetOverride.body.effective_limits.ai_generations_per_month === freeBetaPlan.limits.ai_generations_per_month, 'teacher effective AI generation limit should fall back to plan default');
+        }finally{
+          if(tempTeacherId){
+            await req('DELETE', '/api/admin/teachers/' + tempTeacherId, { 'X-Admin-Password': adminPassword });
+          }
+        }
       }finally{
         await req(
           'PATCH',

@@ -110,6 +110,21 @@
     };
   }
 
+  function getTeacherUsage(item){
+    var usage = item && item.usage ? item.usage : {};
+    return {
+      aiGenerations: Number(usage.ai_generations) || 0
+    };
+  }
+
+  function getEffectiveLimits(item){
+    var limits = item && item.effective_limits ? item.effective_limits : {};
+    var aiLimit = limits.ai_generations_per_month;
+    return {
+      aiGenerationsPerMonth: aiLimit == null ? null : Number(aiLimit)
+    };
+  }
+
   function renderTeacherSummary(items){
     var host = $('teacher-list-summary');
     if(!host) return;
@@ -365,6 +380,11 @@
       var email = item.email ? escapeHtml(item.email) : '';
       var provider = item.auth_provider ? escapeHtml(item.auth_provider) : 'password';
       var planLabel = item.plan ? escapeHtml(item.plan) : 'free_beta';
+      var usage = getTeacherUsage(item);
+      var effectiveLimits = getEffectiveLimits(item);
+      var aiLimitOverride = item.ai_generations_per_month_limit_override == null ? '' : String(item.ai_generations_per_month_limit_override);
+      var aiEffectiveLimit = effectiveLimits.aiGenerationsPerMonth == null ? '無制限' : String(effectiveLimits.aiGenerationsPerMonth);
+      var aiLimitLabel = aiLimitOverride === '' ? 'プラン既定値' : '個別上限';
       html += ''
         + '<article class="teacher-card" data-user-id="' + item.id + '">'
         + '  <div class="teacher-card-head">'
@@ -384,6 +404,7 @@
         + '    <div class="teacher-metric"><strong>' + summary.students + '</strong><span>生徒</span></div>'
         + '    <div class="teacher-metric"><strong>' + summary.studentAnswers + '</strong><span>回答</span></div>'
         + '    <div class="teacher-metric"><strong>' + summary.examSessions + '</strong><span>受験記録</span></div>'
+        + '    <div class="teacher-metric"><strong>' + usage.aiGenerations + ' / ' + escapeHtml(aiEffectiveLimit) + '</strong><span>AI生成/月</span></div>'
         + '  </div>'
         + '  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">'
         + '    <div style="display:flex;gap:8px;align-items:center;flex:1;min-width:260px;">'
@@ -393,6 +414,11 @@
         + '    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
         + '      <input class="teacher-password-input" type="password" placeholder="新しいパスワード" style="padding:6px;border-radius:8px;border:1px solid #ddd;" />'
         + '      <button class="btn btn-small" data-action="save-password" data-id="' + item.id + '" type="button">パスワード更新</button>'
+        + '    </div>'
+        + '    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+        + '      <label style="display:flex;gap:6px;align-items:center;color:var(--text-muted);font-size:12px;">AI生成/月<input class="teacher-ai-limit-input" type="number" min="0" step="1" placeholder="空欄でプラン既定値" value="' + escapeHtml(aiLimitOverride) + '" style="padding:6px;border-radius:8px;border:1px solid #ddd;width:150px;" /></label>'
+        + '      <span class="admin-pill">' + escapeHtml(aiLimitLabel) + '</span>'
+        + '      <button class="btn btn-small" data-action="save-ai-limit" data-id="' + item.id + '" type="button">AI上限保存</button>'
         + '    </div>'
         + '  </div>'
         + '  <div class="teacher-card-foot">'
@@ -580,6 +606,42 @@
             return;
           }
           showListMessage('表示名を更新しました。');
+          loadTeachers(true);
+        }).catch(function(){
+          btn.disabled = false;
+          showListMessage('通信に失敗しました', true);
+        });
+      });
+    });
+
+    host.querySelectorAll('button[data-action="save-ai-limit"]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-id');
+        var article = btn.closest('article');
+        var input = article ? article.querySelector('.teacher-ai-limit-input') : null;
+        if(!input) return;
+        var value = (input.value || '').trim();
+        if(value !== '' && !/^\d+$/.test(value)){
+          showListMessage('AI生成上限は0以上の整数、または空欄で入力してください。', true);
+          return;
+        }
+
+        btn.disabled = true;
+        showListMessage('AI生成上限を保存しています...');
+        apiFetch('/api/admin/teachers/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ai_generations_per_month_limit_override: value === '' ? null : Number(value)
+          })
+        }).then(function(r){
+          btn.disabled = false;
+          if(!r.ok){
+            showListMessage('AI生成上限の保存に失敗しました: ' + (((r.body && r.body.error) || r.status)), true);
+            if(r.status === 401) handleInvalidAdminPassword();
+            return;
+          }
+          showListMessage('AI生成上限を更新しました。');
           loadTeachers(true);
         }).catch(function(){
           btn.disabled = false;

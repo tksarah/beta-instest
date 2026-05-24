@@ -761,18 +761,18 @@
   }
   function hideUnsavedModal(){ const modal = el('unsaved-modal'); if(modal) modal.style.display = 'none'; }
 
-  function getAiLimitModalMessage(){
-    const rawLimit = freeBetaLimits && freeBetaLimits.ai_generations_per_month;
+  function getAiLimitModalMessage(limitOverride){
+    const rawLimit = limitOverride != null ? limitOverride : (freeBetaLimits && freeBetaLimits.ai_generations_per_month);
     const limit = rawLimit == null ? null : Number(rawLimit);
     return Number.isFinite(limit)
       ? 'ベータ版でのAI生成は今月' + limit + '回までです。来月になると再び利用できます。'
       : 'ベータ版でのAI生成は今月の上限に達しました。来月になると再び利用できます。';
   }
 
-  function showAiLimitModal(){
+  function showAiLimitModal(limitOverride){
     const modal = el('ai-limit-modal');
     const message = el('ai-limit-message');
-    if(message) message.textContent = getAiLimitModalMessage();
+    if(message) message.textContent = getAiLimitModalMessage(limitOverride);
     setStatus('');
     if(modal) modal.style.display = 'flex';
   }
@@ -1075,7 +1075,7 @@
           const payload = await response.json().catch(function(){ return null; });
           if(!response.ok){
             if(payload && payload.error === 'plan_limit_exceeded' && payload.limit === 'ai_generations_per_month'){
-              showAiLimitModal();
+              showAiLimitModal(payload.max);
               return;
             }
             throw new Error(payload && payload.error ? payload.error : '生成に失敗しました');

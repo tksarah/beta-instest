@@ -489,15 +489,24 @@ async function isTestSetManagementEnabled(){
   return !!(setting && setting.value);
 }
 
-function parsePlanLimitInput(limitName, value){
+function parseOptionalNonNegativeIntegerInput(limitName, value){
   if(value == null || value === '') return null;
-  const parsed = parseInt(value, 10);
+  if(typeof value === 'string' && !/^\d+$/.test(value.trim())){
+    const err = new Error(`invalid_${limitName}`);
+    err.statusCode = 400;
+    throw err;
+  }
+  const parsed = typeof value === 'number' ? value : Number(String(value).trim());
   if(!Number.isInteger(parsed) || parsed < 0){
     const err = new Error(`invalid_${limitName}`);
     err.statusCode = 400;
     throw err;
   }
   return parsed;
+}
+
+function parsePlanLimitInput(limitName, value){
+  return parseOptionalNonNegativeIntegerInput(limitName, value);
 }
 
 function getGoogleOAuthConfig(){
@@ -570,11 +579,26 @@ async function findOrCreateGoogleTeacher(profile){
   return dbGetAsync('SELECT * FROM teachers WHERE id=?', [inserted.lastID]);
 }
 
-function planLimitResponse(res, limitName){
-  return res.status(403).json({
+function planLimitResponse(res, limitName, details){
+  const payload = {
     error: 'plan_limit_exceeded',
     limit: limitName,
     upgrade_hint: 'beta_feedback'
+  };
+  if(details && Object.prototype.hasOwnProperty.call(details, 'max')){
+    payload.max = details.max;
+  }
+  if(details && Object.prototype.hasOwnProperty.call(details, 'current')){
+    payload.current = details.current;
+  }
+  if(details && details.source){
+    payload.source = details.source;
+  }
+  if(details && details.planCode){
+    payload.plan = details.planCode;
+  }
+  return res.status(403).json({
+    ...payload
   });
 }
 
@@ -586,6 +610,28 @@ async function getTeacherPlan(teacherId){
 async function getTeacherPlanDefinition(teacherId){
   const planCode = await getTeacherPlan(teacherId);
   return getPlanDefinition(planCode);
+}
+
+function normalizeTeacherAiLimitOverride(row){
+  if(!row || row.ai_generations_per_month_limit_override == null) return null;
+  const value = Number(row.ai_generations_per_month_limit_override);
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+async function getTeacherAiGenerationLimitInfo(teacherId, teacherRow, planDefinition){
+  const row = teacherRow && Object.prototype.hasOwnProperty.call(teacherRow, 'ai_generations_per_month_limit_override')
+    ? teacherRow
+    : await dbGetAsync('SELECT plan, ai_generations_per_month_limit_override FROM teachers WHERE id=?', [teacherId]);
+  const plan = planDefinition || await getPlanDefinition((row && row.plan) || 'free_beta');
+  const override = normalizeTeacherAiLimitOverride(row);
+  const planLimit = plan && plan.limits ? plan.limits.ai_generations_per_month : null;
+  const max = override != null ? override : planLimit;
+  return {
+    plan: plan,
+    override: override,
+    max: max,
+    source: override != null ? 'teacher_override' : 'plan'
+  };
 }
 
 async function enforcePlanCountLimit(teacherId, limitName, sql, params){
@@ -613,14 +659,17 @@ async function getMonthlyAiUsage(teacherId){
 }
 
 async function enforceMonthlyAiLimit(teacherId){
-  const plan = await getTeacherPlanDefinition(teacherId);
+  const limitInfo = await getTeacherAiGenerationLimitInfo(teacherId);
   const current = await getMonthlyAiUsage(teacherId);
-  const max = plan && plan.limits ? plan.limits.ai_generations_per_month : null;
+  const max = limitInfo.max;
   if(max != null && current >= max){
     const err = new Error('plan_limit_exceeded');
     err.statusCode = 403;
     err.limitName = 'ai_generations_per_month';
-    err.planCode = plan.code;
+    err.planCode = limitInfo.plan.code;
+    err.max = max;
+    err.current = current;
+    err.limitSource = limitInfo.source;
     throw err;
   }
 }
@@ -657,6 +706,25 @@ async function getTeacherDataSummary(teacherId){
     student_answers: answersRow ? answersRow.count : 0,
     exam_sessions: examsRow ? examsRow.count : 0,
     teacher_sessions: sessionsRow ? sessionsRow.count : 0
+  };
+}
+
+async function buildAdminTeacherResponse(row){
+  const [summary, usage, limitInfo] = await Promise.all([
+    getTeacherDataSummary(row.id),
+    getMonthlyAiUsage(row.id),
+    getTeacherAiGenerationLimitInfo(row.id, row)
+  ]);
+  return {
+    ...row,
+    ai_generations_per_month_limit_override: normalizeTeacherAiLimitOverride(row),
+    effective_limits: {
+      ai_generations_per_month: limitInfo.max
+    },
+    usage: {
+      ai_generations: usage
+    },
+    summary: summary
   };
 }
 
@@ -1568,13 +1636,10 @@ app.post('/api/teacher/logout', (req, res) => {
 
 // Admin: teacher user management (manual registration)
 app.get('/api/admin/teachers', requireAdmin, (req, res) => {
-  db.all('SELECT id, username, display_name, active, created_at, email, auth_provider, plan FROM teachers ORDER BY id DESC', async (err, rows) => {
+  db.all('SELECT id, username, display_name, active, created_at, email, auth_provider, plan, ai_generations_per_month_limit_override FROM teachers ORDER BY id DESC', async (err, rows) => {
     if(err) return res.status(500).json({ error: err.message });
     try{
-      const teachers = await Promise.all((rows || []).map(async row => {
-        const summary = await getTeacherDataSummary(row.id);
-        return { ...row, summary: summary };
-      }));
+      const teachers = await Promise.all((rows || []).map(buildAdminTeacherResponse));
       res.json(teachers);
     }catch(summaryErr){
       res.status(500).json({ error: summaryErr.message });
@@ -1693,29 +1758,54 @@ app.put('/api/admin/teachers/:id/password', requireAdmin, (req, res) => {
   });
 });
 
-// Update teacher display name
+// Update teacher settings
 app.patch('/api/admin/teachers/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
-  const { display_name, plan } = req.body || {};
-  const dn = typeof display_name === 'string' ? display_name.trim() : '';
+  const body = req.body || {};
   (async () => {
     try{
-      let nextPlan = null;
-      if(typeof plan === 'string' && plan.trim()){
-        nextPlan = plan.trim();
+      const updates = [];
+      const params = [];
+
+      if(Object.prototype.hasOwnProperty.call(body, 'display_name')){
+        updates.push('display_name=?');
+        params.push(typeof body.display_name === 'string' ? body.display_name.trim() : '');
+      }
+
+      if(Object.prototype.hasOwnProperty.call(body, 'plan')){
+        const nextPlan = typeof body.plan === 'string' ? body.plan.trim() : '';
+        if(!nextPlan){
+          return res.status(400).json({ error: 'invalid_plan' });
+        }
         const existingPlan = await dbGetAsync('SELECT code FROM plans WHERE code=?', [nextPlan]);
         if(!existingPlan){
           return res.status(400).json({ error: 'invalid_plan' });
         }
+        updates.push('plan=?');
+        params.push(nextPlan);
       }
-      const updateSql = nextPlan
-        ? 'UPDATE teachers SET display_name=?, plan=? WHERE id=?'
-        : 'UPDATE teachers SET display_name=? WHERE id=?';
-      const updateParams = nextPlan ? [dn, nextPlan, id] : [dn, id];
-      const result = await dbRunAsync(updateSql, updateParams);
+
+      if(Object.prototype.hasOwnProperty.call(body, 'ai_generations_per_month_limit_override')){
+        updates.push('ai_generations_per_month_limit_override=?');
+        params.push(parseOptionalNonNegativeIntegerInput(
+          'ai_generations_per_month_limit_override',
+          body.ai_generations_per_month_limit_override
+        ));
+      }
+
+      if(!updates.length) return res.status(400).json({ error: 'no_update_fields' });
+
+      params.push(id);
+      const result = await dbRunAsync(
+        `UPDATE teachers SET ${updates.join(', ')} WHERE id=?`,
+        params
+      );
       if(!result.changes) return res.status(404).json({ error: 'not_found' });
-      const row = await dbGetAsync('SELECT id, username, display_name, active, created_at, plan FROM teachers WHERE id=?', [id]);
-      res.json(row || {});
+      const row = await dbGetAsync(
+        'SELECT id, username, display_name, active, created_at, email, auth_provider, plan, ai_generations_per_month_limit_override FROM teachers WHERE id=?',
+        [id]
+      );
+      res.json(row ? await buildAdminTeacherResponse(row) : {});
     }catch(err){
       res.status(err.statusCode || 500).json({ error: err.message });
     }
@@ -2542,7 +2632,14 @@ app.post('/api/generate-questions', requireTeacher, async (req, res) => {
       });
     })(0);
   }catch(err){
-    if(err.statusCode === 403 && err.limitName) return planLimitResponse(res, err.limitName);
+    if(err.statusCode === 403 && err.limitName) {
+      return planLimitResponse(res, err.limitName, {
+        max: err.max,
+        current: err.current,
+        source: err.limitSource,
+        planCode: err.planCode
+      });
+    }
     console.error(err);
     res.status(500).json({ error: err.message || 'question generation failed' });
   }

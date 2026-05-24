@@ -574,9 +574,11 @@
       });
     }
 
-    function openPlanLimitModal(limitName){
+    function openPlanLimitModal(limitName, limitOverride){
       var normalizedLimitName = typeof limitName === 'string' ? limitName.trim() : '';
-      var rawLimitValue = Object.prototype.hasOwnProperty.call(freeBetaLimits || {}, normalizedLimitName)
+      var rawLimitValue = limitOverride != null
+        ? limitOverride
+        : Object.prototype.hasOwnProperty.call(freeBetaLimits || {}, normalizedLimitName)
         ? freeBetaLimits[normalizedLimitName]
         : null;
       var limitValue = rawLimitValue == null ? null : Number(rawLimitValue);
@@ -602,6 +604,14 @@
           body: planLimitModal.limitValue != null
             ? 'ベータ版でのテスト作成は' + planLimitModal.limitValue + '件までです。'
             : 'ベータ版でのテスト作成は上限までです。'
+        };
+      }
+      if(planLimitModal.limitName === 'ai_generations_per_month'){
+        return {
+          title: 'AI生成回数の上限に達しました',
+          body: planLimitModal.limitValue != null
+            ? 'ベータ版でのAI生成は今月' + planLimitModal.limitValue + '回までです。'
+            : 'ベータ版でのAI生成は今月の上限までです。'
         };
       }
       return {
@@ -1052,7 +1062,32 @@
     }
 
     // showUserSummary / closeUserSummary removed
-    function generate(){ if(!textForAI || !window.selectedTestId){ setMessage('テキストとテスト選択が必要です'); return; } setMessage('生成中...'); fetch('/api/generate-questions',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ testId: window.selectedTestId, text: textForAI })}).then(r=>r.json()).then(j=>{ setMessage('生成完了: '+(j.length||0)+'問'); fetchQuestions(window.selectedTestId).then(qs=>{ setModalQuestions(qs || []); setModalOpen(true); }); }).catch(err=>setMessage('エラー')); }
+    function generate(){
+      if(!textForAI || !window.selectedTestId){ setMessage('テキストとテスト選択が必要です'); return; }
+      setMessage('生成中...');
+      fetch('/api/generate-questions', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ testId: window.selectedTestId, text: textForAI })
+      }).then(async function(r){
+        const j = await r.json().catch(function(){ return { error: '生成に失敗しました' }; });
+        if(!r.ok){
+          if(j && j.error === 'plan_limit_exceeded'){
+            openPlanLimitModal(j.limit || 'ai_generations_per_month', j.max);
+            return null;
+          }
+          throw new Error((j && j.error) || '生成に失敗しました');
+        }
+        return j;
+      }).then(function(j){
+        if(!j) return;
+        setMessage('生成完了: ' + (j.length || 0) + '問');
+        fetchQuestions(window.selectedTestId).then(function(qs){
+          setModalQuestions(qs || []);
+          setModalOpen(true);
+        });
+      }).catch(function(){ setMessage('エラー'); });
+    }
     function openTest(t){ window.selectedTestId = t.id; setMessage('テスト '+t.name+' を選択しました'); fetchQuestions(t.id); }
 
     function updateModalQuestionText(qIndex, value){ setModalQuestions(prev=>{ const arr = prev.map(q=> ({...q}) ); arr[qIndex].text = value; return arr; }); }
