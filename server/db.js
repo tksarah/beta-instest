@@ -3,6 +3,24 @@ const path = require('path');
 const dbFile = process.env.SQLITE_DB_PATH || path.join(__dirname, 'data.sqlite');
 const db = new sqlite3.Database(dbFile);
 
+function parseInitialLimit(value, fallback){
+  const parsed = parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+const defaultFreeBetaPlan = {
+  code: 'free_beta',
+  display_name: '無料ベータ',
+  classes_limit: parseInitialLimit(process.env.FREE_BETA_CLASS_LIMIT, 2),
+  tests_limit: parseInitialLimit(process.env.FREE_BETA_TEST_LIMIT, 3),
+  students_limit: parseInitialLimit(process.env.FREE_BETA_STUDENT_LIMIT, 50),
+  ai_generations_per_month_limit: parseInitialLimit(process.env.FREE_BETA_AI_GENERATION_LIMIT, 15)
+};
+
+const defaultSystemSettings = Object.freeze({
+  test_sets_management_enabled: '0'
+});
+
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS teachers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +69,59 @@ db.serialize(() => {
     expires_at TEXT,
     FOREIGN KEY(teacher_id) REFERENCES teachers(id)
   );`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS plans (
+    code TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    classes_limit INTEGER,
+    tests_limit INTEGER,
+    students_limit INTEGER,
+    ai_generations_per_month_limit INTEGER,
+    active INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+  );`);
+
+  const nowIso = new Date().toISOString();
+  db.run(
+    `INSERT OR IGNORE INTO plans (
+      code,
+      display_name,
+      classes_limit,
+      tests_limit,
+      students_limit,
+      ai_generations_per_month_limit,
+      active,
+      created_at,
+      updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      defaultFreeBetaPlan.code,
+      defaultFreeBetaPlan.display_name,
+      defaultFreeBetaPlan.classes_limit,
+      defaultFreeBetaPlan.tests_limit,
+      defaultFreeBetaPlan.students_limit,
+      defaultFreeBetaPlan.ai_generations_per_month_limit,
+      1,
+      nowIso,
+      nowIso
+    ]
+  );
+
+  db.run(`CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT
+  );`);
+
+  Object.keys(defaultSystemSettings).forEach((key) => {
+    db.run(
+      `INSERT OR IGNORE INTO system_settings (key, value, created_at, updated_at)
+       VALUES (?,?,?,?)`,
+      [key, defaultSystemSettings[key], nowIso, nowIso]
+    );
+  });
 
   db.run(`CREATE TABLE IF NOT EXISTS classes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,6 +363,34 @@ db.serialize(() => {
 
   db.run('CREATE INDEX IF NOT EXISTS idx_exam_session_questions_session_position ON exam_session_questions(session_id, position)');
   db.run('CREATE INDEX IF NOT EXISTS idx_exam_session_questions_session_answered ON exam_session_questions(session_id, answered_at)');
+
+  db.run(`CREATE TABLE IF NOT EXISTS contact_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    admin_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  );`);
+
+  db.all("PRAGMA table_info('contact_requests')", (err, rows) => {
+    if(err) return;
+    const hasColumn = (name) => rows && rows.some(r => r.name === name);
+    if(!hasColumn('status')){
+      db.run("ALTER TABLE contact_requests ADD COLUMN status TEXT NOT NULL DEFAULT 'new'", (e) => {
+        if(e){ console.error('Failed to add status column to contact_requests:', e.message); }
+        else { console.log('Added status column to contact_requests'); }
+      });
+    }
+    if(!hasColumn('admin_note')){
+      db.run("ALTER TABLE contact_requests ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''", (e) => {
+        if(e){ console.error('Failed to add admin_note column to contact_requests:', e.message); }
+        else { console.log('Added admin_note column to contact_requests'); }
+      });
+    }
+  });
+
+  db.run('CREATE INDEX IF NOT EXISTS idx_contact_requests_created_at ON contact_requests(created_at DESC, id DESC)');
 });
 
 module.exports = db;

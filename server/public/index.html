@@ -2,9 +2,9 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>InstantTest | 授業中の小テストをすばやく作成・配布・確認</title>
+  <title>InstantTest | 授業中の小テストを、最短1分で作成・配布・確認</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="InstantTestは、講師が授業中に小テストをすばやく作成し、QRやURLで配布し、結果を確認できる無償ベータ版の小テスト支援ツールです。">
+  <meta name="description" content="InstantTestは、教材テキストから小テストを作成し、QRやURLで配布、回答結果までその場で確認できる教師向けWebアプリです。">
   <meta property="og:title" content="InstantTest">
   <meta property="og:description" content="AIで小テスト作成、QRで配布、結果確認までを授業中にすばやく。">
   <meta name="robots" content="index,follow">
@@ -24,87 +24,354 @@
       <a href="#flow">使い方</a>
       <a href="#faq">FAQ</a>
       <a href="/login.html">ログイン</a>
-      <a class="btn btn-primary btn-small" href="/api/auth/google/start">Googleで無料登録</a>
+      <a class="btn btn-primary btn-small" href="/api/auth/google/start">無料ベータ登録</a>
     </nav>
   </header>
 
   <main id="main-content">
-    <section class="landing-hero">
+    <section class="landing-hero" aria-labelledby="landing-hero-title">
       <div class="landing-hero__copy">
-        <p class="landing-eyebrow">Free beta for teachers</p>
-        <h1>授業中の小テストを、作成から結果確認まで一気に。</h1>
-        <p class="landing-lead">InstantTestは、講師が教材テキストから小テストを作り、QRやURLで生徒へ配布し、回答結果をその場で確認するためのWebアプリです。</p>
+        <p class="landing-eyebrow landing-eyebrow--hero">FREE BETA FOR TEACHERS</p>
+        <h1 id="landing-hero-title">授業中の小テストを、<br><span>最短1分</span>で。</h1>
+        <p class="landing-lead">教材テキストから小テストを作成し、QRで配布。回答結果までその場で確認できる、先生向けのWebアプリです。</p>
+
+        <div class="landing-value-grid" aria-label="主な価値">
+          <article class="landing-value-card">
+            <span class="landing-value-card__icon landing-value-card__icon--blue" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"></path>
+                <path d="M14 3v5h5"></path>
+                <path d="M9 13h6"></path>
+                <path d="M9 17h4"></path>
+                <path d="m17.5 13.5.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6Z"></path>
+              </svg>
+            </span>
+            <div>
+              <strong>教材から自動作成</strong>
+              <p>テキストを貼るだけ</p>
+            </div>
+          </article>
+          <article class="landing-value-card">
+            <span class="landing-value-card__icon landing-value-card__icon--green" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <rect x="4" y="4" width="6" height="6" rx="1.5"></rect>
+                <rect x="14" y="4" width="6" height="6" rx="1.5"></rect>
+                <rect x="4" y="14" width="6" height="6" rx="1.5"></rect>
+                <path d="M14 14h2v2h-2z"></path>
+                <path d="M18 14h2v6h-6v-2h4z"></path>
+              </svg>
+            </span>
+            <div>
+              <strong>QRですぐ配布</strong>
+              <p>生徒にURLを共有</p>
+            </div>
+          </article>
+          <article class="landing-value-card">
+            <span class="landing-value-card__icon landing-value-card__icon--violet" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 20V10"></path>
+                <path d="M10 20V6"></path>
+                <path d="M16 20v-4"></path>
+                <path d="M22 20H2"></path>
+                <path d="m16 9 2 2 4-5"></path>
+              </svg>
+            </span>
+            <div>
+              <strong>結果を即確認</strong>
+              <p>理解度をすぐに把握</p>
+            </div>
+          </article>
+        </div>
+
         <div class="landing-actions">
-          <a class="btn btn-primary" href="/api/auth/google/start">Googleアカウントで無料ベータを始める</a>
-          <a class="btn btn-ghost" data-feedback-link href="#feedback">フィードバックを送る</a>
+          <a class="btn btn-primary landing-hero__primary" href="/api/auth/google/start">無料ベータを試す</a>
+          <a class="btn btn-ghost landing-hero__secondary" href="#samples">デモを見る</a>
         </div>
-        <p class="landing-note">無償ベータ版です。Googleログイン後すぐに講師用ダッシュボードを利用できます。</p>
+        <button class="landing-inline-action" type="button" data-open-contact-modal>Googleアカウント以外で相談する</button>
+        <div class="landing-meta" aria-label="補足情報">
+          <span>登録は1分ほど</span>
+          <span>クレジットカード不要</span>
+        </div>
       </div>
-      <div class="landing-hero__product" aria-label="InstantTestの画面イメージ">
-        <div class="product-bar"><span></span><span></span><span></span></div>
-        <div class="product-panel">
-          <div>
-            <p class="panel-label">今日の小テスト</p>
-            <h2>単元確認テスト</h2>
-            <p>問題 5問 / 公開中 / QR配布</p>
+
+      <div class="landing-hero__product" aria-label="InstantTestの利用イメージ">
+        <figure class="landing-hero__figure">
+          <img
+            class="landing-hero__image"
+            src="/assets/hero/instanttest-hero.png"
+            alt="InstantTestのダッシュボード、QR参加画面、リアルタイム結果、スマートフォン受験画面のイメージ"
+            width="1672"
+            height="941"
+            decoding="async"
+            fetchpriority="high"
+          >
+        </figure>
+      </div>
+    </section>
+
+    <section id="flow" class="landing-section landing-howto" aria-labelledby="flow-title">
+      <div class="section-heading landing-howto__heading">
+        <p class="landing-eyebrow">How it works</p>
+        <h2 id="flow-title"><span class="landing-heading-nowrap">授業前の準備から授業中の確認まで、</span><span class="landing-heading-nowrap">5ステップで進められます</span></h2>
+        <p class="landing-section-lead">クラス作成、テスト準備、問題作成、配布、結果確認までを、授業の流れに沿ってひとつながりで進められます。</p>
+      </div>
+      <div class="landing-howto__board">
+        <section class="landing-howto__column landing-howto__column--prep" aria-labelledby="howto-prep-title">
+          <div class="landing-howto__column-head">
+            <span class="landing-howto__column-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <rect x="3" y="5" width="18" height="16" rx="3"></rect>
+                <path d="M8 3v4"></path>
+                <path d="M16 3v4"></path>
+                <path d="M3 10h18"></path>
+              </svg>
+            </span>
+            <h3 id="howto-prep-title">授業前に準備</h3>
           </div>
-          <div class="metric-row">
-            <div><strong>32</strong><span>参加</span></div>
-            <div><strong>84%</strong><span>平均</span></div>
-            <div><strong>4分</strong><span>回答</span></div>
+          <div class="landing-howto__steps">
+            <article class="landing-howto__step">
+              <div class="landing-howto__visual" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M5 18v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1"></path>
+                  <circle cx="11" cy="8" r="3"></circle>
+                  <path d="M18 9h4"></path>
+                  <path d="M20 7v4"></path>
+                </svg>
+              </div>
+              <div class="landing-howto__content">
+                <div class="landing-howto__title-row">
+                  <span class="landing-howto__step-number">1</span>
+                  <h4>クラスを作成</h4>
+                </div>
+                <p>授業を行うクラスを作成します。</p>
+              </div>
+            </article>
+            <article class="landing-howto__step">
+              <div class="landing-howto__visual" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"></path>
+                  <path d="M14 3v5h5"></path>
+                  <path d="M9 13h6"></path>
+                  <path d="M9 17h4"></path>
+                </svg>
+              </div>
+              <div class="landing-howto__content">
+                <div class="landing-howto__title-row">
+                  <span class="landing-howto__step-number">2</span>
+                  <h4>テストを作成</h4>
+                </div>
+                <p>テストのタイトルや概要を設定します。</p>
+              </div>
+            </article>
+            <article class="landing-howto__step">
+              <div class="landing-howto__visual" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 20h4"></path>
+                  <path d="M14 4l6 6"></path>
+                  <path d="M13 5 6 12v4h4l7-7"></path>
+                  <path d="m12 20 2-2"></path>
+                </svg>
+              </div>
+              <div class="landing-howto__content">
+                <div class="landing-howto__title-row">
+                  <span class="landing-howto__step-number">3</span>
+                  <h4>問題を作成</h4>
+                </div>
+                <p>手動で作成するか、AIで自動生成します。</p>
+                <div class="landing-howto__chips" aria-label="問題作成の方法">
+                  <span class="landing-howto__chip">手動</span>
+                  <span class="landing-howto__chip">AI自動生成</span>
+                </div>
+              </div>
+            </article>
           </div>
-          <ol class="question-preview">
-            <li>要点を確認する単一選択問題</li>
-            <li>理解度を測る複数選択問題</li>
-            <li>授業後に見返せる解説つき</li>
-          </ol>
+        </section>
+
+        <div class="landing-howto__arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M6 12h12"></path>
+            <path d="m13 5 7 7-7 7"></path>
+          </svg>
         </div>
+
+        <section class="landing-howto__column landing-howto__column--live" aria-labelledby="howto-live-title">
+          <div class="landing-howto__column-head">
+            <span class="landing-howto__column-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <rect x="3" y="4" width="18" height="12" rx="2.5"></rect>
+                <path d="M8 20h8"></path>
+                <path d="M12 16v4"></path>
+              </svg>
+            </span>
+            <h3 id="howto-live-title">授業中に使う</h3>
+          </div>
+          <div class="landing-howto__steps landing-howto__steps--short">
+            <article class="landing-howto__step">
+              <div class="landing-howto__visual landing-howto__visual--live" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 4h6v6H4z"></path>
+                  <path d="M14 4h6v6h-6z"></path>
+                  <path d="M4 14h6v6H4z"></path>
+                  <path d="M15 14h1"></path>
+                  <path d="M18 14h2v2"></path>
+                  <path d="M14 18h2"></path>
+                  <path d="M18 18h2"></path>
+                  <path d="M16 16v4"></path>
+                </svg>
+              </div>
+              <div class="landing-howto__content">
+                <div class="landing-howto__title-row">
+                  <span class="landing-howto__step-number">4</span>
+                  <h4>テストを公開・配布</h4>
+                </div>
+                <div class="landing-howto__chips landing-howto__chips--compact" aria-label="配布方法">
+                  <span class="landing-howto__chip">QRコード</span>
+                  <span class="landing-howto__chip">URL</span>
+                </div>
+                <p>生徒にテストを公開し、配布します。</p>
+              </div>
+            </article>
+            <article class="landing-howto__step">
+              <div class="landing-howto__visual landing-howto__visual--live" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 19V9"></path>
+                  <path d="M10 19V5"></path>
+                  <path d="M16 19v-6"></path>
+                  <path d="M22 19H2"></path>
+                  <path d="M6 7h12"></path>
+                  <path d="M6 7a2 2 0 1 1 0-4h12a2 2 0 1 1 0 4"></path>
+                </svg>
+              </div>
+              <div class="landing-howto__content">
+                <div class="landing-howto__title-row">
+                  <span class="landing-howto__step-number">5</span>
+                  <h4>結果・状況を確認</h4>
+                </div>
+                <div class="landing-howto__chips landing-howto__chips--compact" aria-label="確認できる情報">
+                  <span class="landing-howto__chip landing-howto__chip--wide">回答状況・正答率をリアルタイム把握</span>
+                </div>
+                <p>生徒の回答状況や正答率をリアルタイムで確認できます。</p>
+              </div>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
 
     <section id="features" class="landing-section">
       <div class="section-heading">
         <p class="landing-eyebrow">Features</p>
-        <h2>講師の授業中ワークフローに合わせた機能</h2>
+        <h2>授業中のワークフローに合わせた機能</h2>
       </div>
       <div class="landing-grid">
         <article class="landing-card">
           <h3>教材からAIで問題作成</h3>
-          <p>授業内容のテキストをもとに、選択式の小テスト案を生成し、講師が編集して公開できます。</p>
+          <p>授業内容のテキストをもとに、選択式の小テスト案を生成。先生が編集してから公開できます。</p>
         </article>
         <article class="landing-card">
           <h3>QR・URLで即時配布</h3>
-          <p>クラスとテストを作成したら、生徒はブラウザから参加できます。専用アプリのインストールは不要です。</p>
+          <p>クラスとテストを用意したら、生徒はブラウザから参加できます。専用アプリのインストールは不要です。</p>
         </article>
         <article class="landing-card">
           <h3>回答結果をすばやく確認</h3>
-          <p>受験セッション、スコア、正誤、解説を確認し、授業中の理解度チェックに活用できます。</p>
+          <p>受験セッション、スコア、正答率、解説を確認し、授業中の理解度チェックに活用できます。</p>
         </article>
       </div>
     </section>
 
-    <section id="flow" class="landing-section landing-band">
+    <section id="samples" class="landing-section landing-samples">
       <div class="section-heading">
-        <p class="landing-eyebrow">Flow</p>
-        <h2>3ステップで小テストを実施</h2>
+        <p class="landing-eyebrow">Product samples</p>
+        <h2><span class="landing-heading-nowrap">先生側と生徒側の画面を、</span><span class="landing-heading-nowrap">授業の流れで確認できます</span></h2>
+        <p class="landing-section-lead">準備、問題作成、配布、受験、ふりかえりまで。実際の画面に近いサンプルで確認できます。</p>
       </div>
-      <div class="flow-list">
-        <div><span>1</span><p>Googleで講師登録し、クラスを作成</p></div>
-        <div><span>2</span><p>教材テキストから問題を作成・編集して公開</p></div>
-        <div><span>3</span><p>QRやURLを共有し、生徒の回答結果を確認</p></div>
+      <div class="sample-groups">
+        <section class="sample-group sample-group--teacher" aria-labelledby="teacher-sample-heading">
+          <div class="sample-group__header">
+            <div>
+              <p class="sample-group__eyebrow">Teacher-side</p>
+              <h3 id="teacher-sample-heading">先生側</h3>
+              <p>授業前後の準備、問題編集、結果分析をひとつの流れで扱えます。</p>
+            </div>
+            <span class="sample-group__badge">先生用画面</span>
+          </div>
+          <div class="sample-grid">
+            <article class="sample-card">
+              <p class="sample-card__eyebrow">Teacher dashboard</p>
+              <h3>準備状況を一覧管理</h3>
+              <figure class="sample-screenshot">
+                <img src="/assets/lp-samples/teacher-dashboard.png" alt="InstantTestのテスト準備ダッシュボード画面" loading="lazy">
+              </figure>
+              <p class="sample-card__note">公開状態、配布準備、要確認のテストを1画面で把握できます。</p>
+            </article>
+            <article class="sample-card">
+              <p class="sample-card__eyebrow">Question editor</p>
+              <h3>教材から問題を作成</h3>
+              <figure class="sample-screenshot">
+                <img src="/assets/lp-samples/teacher-editor.png" alt="教材テキストから小テスト問題を作成する編集画面" loading="lazy">
+              </figure>
+              <p class="sample-card__note">教材テキストをもとに設問案を作り、先生が調整して公開できます。</p>
+            </article>
+            <article class="sample-card">
+              <p class="sample-card__eyebrow">Reports</p>
+              <h3>受験結果を分析</h3>
+              <figure class="sample-screenshot">
+                <img src="/assets/lp-samples/teacher-reports.png" alt="平均正答率と問題別の回答率を確認する成績分析画面" loading="lazy">
+              </figure>
+              <p class="sample-card__note">平均正答率や設問別の傾向を確認し、授業内のフォローに使えます。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="sample-group sample-group--student" aria-labelledby="student-sample-heading">
+          <div class="sample-group__header">
+            <div>
+              <p class="sample-group__eyebrow">Student-side</p>
+              <h3 id="student-sample-heading">生徒側</h3>
+              <p>共有URLから入り、回答し、結果をふりかえるまでをブラウザだけで進められます。</p>
+            </div>
+            <span class="sample-group__badge">生徒用画面</span>
+          </div>
+          <div class="sample-grid">
+            <article class="sample-card">
+              <p class="sample-card__eyebrow">Student start</p>
+              <h3>表示名を入力して参加</h3>
+              <figure class="sample-screenshot">
+                <img src="/assets/lp-samples/student-start.png" alt="共有された小テストに表示名を入力して参加する画面" loading="lazy">
+              </figure>
+              <p class="sample-card__note">共有されたテストにすぐ参加でき、クラスやテスト内容も確認できます。</p>
+            </article>
+            <article class="sample-card">
+              <p class="sample-card__eyebrow">Student exam</p>
+              <h3>ブラウザで回答</h3>
+              <figure class="sample-screenshot">
+                <img src="/assets/lp-samples/student-exam.png" alt="進捗を見ながら選択式の小テストに回答する画面" loading="lazy">
+              </figure>
+              <p class="sample-card__note">進捗と残り問題数を見ながら、授業中でも迷いにくい画面で回答できます。</p>
+            </article>
+            <article class="sample-card">
+              <p class="sample-card__eyebrow">Student summary</p>
+              <h3>結果をふりかえる</h3>
+              <figure class="sample-screenshot">
+                <img src="/assets/lp-samples/student-summary.png" alt="得点と正解数を確認して問題ごとにふりかえる画面" loading="lazy">
+              </figure>
+              <p class="sample-card__note">得点、正解数、見直しポイントをその場で確認できます。</p>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
 
     <section class="landing-section">
       <div class="section-heading">
         <p class="landing-eyebrow">Beta plan</p>
-        <h2>無償ベータ版の利用上限</h2>
+        <h2>無料ベータ版の利用上限</h2>
       </div>
       <div class="limit-grid">
-        <div><strong>10</strong><span>クラス</span></div>
-        <div><strong>100</strong><span>テスト</span></div>
-        <div><strong>500</strong><span>生徒</span></div>
-        <div><strong>50</strong><span>AI生成/月</span></div>
+        <div><strong id="free-beta-limit-classes">2</strong><span>クラス</span></div>
+        <div><strong id="free-beta-limit-tests">3</strong><span>テスト</span></div>
+        <div><strong id="free-beta-limit-students">50</strong><span>生徒</span></div>
+        <div><strong id="free-beta-limit-ai">15</strong><span>AI生成 / 月</span></div>
       </div>
       <p class="landing-note">上限は運用状況により変更する場合があります。正式版では利用状況とフィードバックをもとにプランを検討します。</p>
     </section>
@@ -120,11 +387,11 @@
       </details>
       <details>
         <summary>ベータ版は無料ですか？</summary>
-        <p>はい。現在は無償ベータとして提供します。品質改善のため、ぜひフィードバックをお寄せください。</p>
+        <p>はい。現在は無料ベータとして提供しています。品質改善のため、ぜひフィードバックをお寄せください。</p>
       </details>
       <details>
         <summary>AI生成は必須ですか？</summary>
-        <p>必須ではありません。講師が手動で問題を作成・編集することもできます。</p>
+        <p>必須ではありません。先生が手動で問題を作成・編集することもできます。</p>
       </details>
     </section>
 
@@ -132,11 +399,30 @@
       <h2>まずは授業で試して、率直な声を聞かせてください。</h2>
       <div class="landing-actions">
         <a class="btn btn-primary" href="/api/auth/google/start">Googleで無料登録</a>
+        <button class="btn btn-secondary" type="button" data-open-contact-modal>Googleアカウント以外の利用を相談する</button>
         <a class="btn btn-ghost" data-feedback-link href="mailto:feedback@example.com">フィードバックを送る</a>
       </div>
       <p><a href="/terms.html">利用規約</a> / <a href="/privacy.html">プライバシーポリシー</a></p>
     </section>
   </main>
+
+  <div id="contact-request-modal" class="modal modal-centered landing-contact-modal" style="display:none;" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="contact-request-title">
+      <h3 id="contact-request-title">Googleアカウント以外での利用相談</h3>
+      <p class="landing-contact-modal__lead">お名前とメールアドレスを入力してください。内容を確認のうえ、利用方法をご案内します。</p>
+      <form id="contact-request-form" class="landing-contact-form">
+        <label for="contact-request-name">お名前</label>
+        <input id="contact-request-name" name="name" type="text" autocomplete="name" maxlength="120" required />
+        <label for="contact-request-email">メールアドレス</label>
+        <input id="contact-request-email" name="email" type="email" autocomplete="email" maxlength="255" required />
+        <div id="contact-request-status" class="status-message" aria-live="polite"></div>
+        <div class="landing-contact-modal__actions">
+          <button id="contact-request-cancel" class="btn btn-ghost" type="button">閉じる</button>
+          <button id="contact-request-submit" class="btn btn-primary" type="submit">送信する</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="/landing.js"></script>
 </body>

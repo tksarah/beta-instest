@@ -114,12 +114,13 @@ Docker 実行時は SQLITE_DB_PATH=/data/data.sqlite が設定されるため、
 | DOMAIN | 公開ドメイン名 |
 | APP_BASE_URL | ベース URL |
 | BETA_FEEDBACK_URL | フィードバック導線 |
-| FREE_BETA_CLASS_LIMIT | 無料ベータのクラス数上限 |
-| FREE_BETA_TEST_LIMIT | 無料ベータのテスト数上限 |
-| FREE_BETA_STUDENT_LIMIT | 無料ベータの生徒数上限 |
-| FREE_BETA_AI_GENERATION_LIMIT | 月間 AI 生成回数上限 |
+| FREE_BETA_CLASS_LIMIT | free_beta プラン初期作成時のクラス数上限 |
+| FREE_BETA_TEST_LIMIT | free_beta プラン初期作成時のテスト数上限 |
+| FREE_BETA_STUDENT_LIMIT | free_beta プラン初期作成時の生徒数上限 |
+| FREE_BETA_AI_GENERATION_LIMIT | free_beta プラン初期作成時の月間 AI 生成回数上限 |
 
 値のひな形はルートの .env.example にまとまっています。
+free_beta の実運用上限は、初回起動後は管理画面の「プランごとの利用上限」から更新できます。
 
 ## ディレクトリ構成
 

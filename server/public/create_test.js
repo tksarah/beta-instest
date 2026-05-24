@@ -6,6 +6,7 @@
   function nextFrame(fn){ window.requestAnimationFrame(fn); }
 
   const state = { questions: [], editingIndex: -1, editorChoices: [], page: 0, selectedQuestionIndexes: new Set() };
+  let freeBetaLimits = { ai_generations_per_month: null };
   let pendingQuestionDeletion = null;
   let isDirty = false;
   let lastSavedClassId = '';
@@ -298,6 +299,18 @@
       });
       return classes || [];
     }catch(e){ setStatus('クラス取得エラー', true); return []; }
+  }
+
+  async function loadFreeBetaLimits(){
+    try{
+      const res = await fetch('/api/public-config');
+      const config = await res.json().catch(function(){ return null; });
+      if(res.ok && config && config.free_beta_limits){
+        freeBetaLimits = Object.assign({}, freeBetaLimits, config.free_beta_limits);
+      }
+    }catch(error){
+      console.error(error);
+    }
   }
 
   function renderChoicesEditor(){
@@ -748,6 +761,27 @@
   }
   function hideUnsavedModal(){ const modal = el('unsaved-modal'); if(modal) modal.style.display = 'none'; }
 
+  function getAiLimitModalMessage(){
+    const rawLimit = freeBetaLimits && freeBetaLimits.ai_generations_per_month;
+    const limit = rawLimit == null ? null : Number(rawLimit);
+    return Number.isFinite(limit)
+      ? 'ベータ版でのAI生成は今月' + limit + '回までです。来月になると再び利用できます。'
+      : 'ベータ版でのAI生成は今月の上限に達しました。来月になると再び利用できます。';
+  }
+
+  function showAiLimitModal(){
+    const modal = el('ai-limit-modal');
+    const message = el('ai-limit-message');
+    if(message) message.textContent = getAiLimitModalMessage();
+    setStatus('');
+    if(modal) modal.style.display = 'flex';
+  }
+
+  function hideAiLimitModal(){
+    const modal = el('ai-limit-modal');
+    if(modal) modal.style.display = 'none';
+  }
+
   function handleNavigate(href){
     if(!isDirty) { window.location.href = href; return; }
     showUnsavedModal();
@@ -789,6 +823,25 @@
       const isOpen = modal && modal.style.display !== 'none';
       if(isOpen && event.key === 'Escape'){
         hideDeleteQuestionsModal();
+      }
+    });
+  }
+
+  function setupAiLimitModal(){
+    const modal = el('ai-limit-modal');
+    const closeButton = el('ai-limit-close');
+    if(closeButton) closeButton.addEventListener('click', hideAiLimitModal);
+    if(modal){
+      modal.addEventListener('click', function(event){
+        if(event.target === modal){
+          hideAiLimitModal();
+        }
+      });
+    }
+    document.addEventListener('keydown', function(event){
+      const isOpen = modal && modal.style.display !== 'none';
+      if(isOpen && event.key === 'Escape'){
+        hideAiLimitModal();
       }
     });
   }
@@ -943,11 +996,13 @@
     // setup unsaved handlers
     setupUnsavedHandlers();
     setupDeleteQuestionsModal();
+    setupAiLimitModal();
 
     // initialize editor and classes, and prefill from query params if provided
     resetEditor(); renderQuestionsList();
     (async function(){
-      const classes = await loadClasses();
+      const results = await Promise.all([loadClasses(), loadFreeBetaLimits()]);
+      const classes = results[0] || [];
       // parse query params
       const params = new URLSearchParams(window.location.search);
       const presetName = params.get('name');
@@ -1019,6 +1074,10 @@
           });
           const payload = await response.json().catch(function(){ return null; });
           if(!response.ok){
+            if(payload && payload.error === 'plan_limit_exceeded' && payload.limit === 'ai_generations_per_month'){
+              showAiLimitModal();
+              return;
+            }
             throw new Error(payload && payload.error ? payload.error : '生成に失敗しました');
           }
           const generatedQuestions = Array.isArray(payload && payload.questions) ? payload.questions : [];

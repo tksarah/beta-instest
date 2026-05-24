@@ -63,6 +63,15 @@ function assert(condition, message){
     await dbRun('INSERT INTO teacher_sessions (token, teacher_id, expires_at, created_at, last_seen_at) VALUES (?,?,?,?,?)', [token, teacherId, expiresAt, now, now]);
     created.sessions.push(token);
 
+    await dbRun(
+      'INSERT OR IGNORE INTO system_settings (key, value, created_at, updated_at) VALUES (?,?,?,?)',
+      ['test_sets_management_enabled', '0', now, now]
+    );
+    await dbRun(
+      'UPDATE system_settings SET value=?, updated_at=? WHERE key=?',
+      ['0', now, 'test_sets_management_enabled']
+    );
+
     const teacherCookie = { Cookie: 'teacher_session=' + encodeURIComponent(token) };
     const classA = (await dbRun('INSERT INTO classes (teacher_id, name) VALUES (?,?)', [teacherId, 'Set Class A ' + unique])).lastID;
     const classB = (await dbRun('INSERT INTO classes (teacher_id, name) VALUES (?,?)', [teacherId, 'Set Class B ' + unique])).lastID;
@@ -79,6 +88,21 @@ function assert(condition, message){
       const c2 = (await dbRun('INSERT INTO choices (question_id, text, is_correct) VALUES (?,?,?)', [q, 'B', 0])).lastID;
       created.choices.push(c1, c2);
     }
+
+    const disabledCreate = await req('POST', '/api/test-sets', {
+      name: 'Disabled Set ' + unique,
+      description: 'should be blocked',
+      public: 1,
+      class_ids: [classA],
+      test_ids: [testA]
+    }, teacherCookie);
+    assert(disabledCreate.status === 403, 'set creation should be blocked while management is disabled');
+    assert(disabledCreate.body && disabledCreate.body.error === 'test_set_management_disabled', 'disabled create should return explicit error');
+
+    await dbRun(
+      'UPDATE system_settings SET value=?, updated_at=? WHERE key=?',
+      ['1', new Date().toISOString(), 'test_sets_management_enabled']
+    );
 
     const createdSet = await req('POST', '/api/test-sets', {
       name: 'Review Set ' + unique,
@@ -129,6 +153,29 @@ function assert(condition, message){
     assert(summary.status === 200 && summary.body && summary.body.totals, 'set summary failed');
     assert(summary.body.totals.completed_tests === 1, 'summary should count partial completion');
     assert(summary.body.totals.possible_tests === 2, 'summary should keep possible test count');
+
+    await dbRun(
+      'UPDATE system_settings SET value=?, updated_at=? WHERE key=?',
+      ['0', new Date().toISOString(), 'test_sets_management_enabled']
+    );
+
+    const blockedUpdate = await req('PUT', '/api/test-sets/' + encodeURIComponent(createdSet.body.id), {
+      public: 0
+    }, teacherCookie);
+    assert(blockedUpdate.status === 403, 'set update should be blocked while management is disabled');
+    assert(blockedUpdate.body && blockedUpdate.body.error === 'test_set_management_disabled', 'disabled update should return explicit error');
+
+    const blockedDelete = await req('DELETE', '/api/test-sets/' + encodeURIComponent(createdSet.body.id), null, teacherCookie);
+    assert(blockedDelete.status === 403, 'set delete should be blocked while management is disabled');
+    assert(blockedDelete.body && blockedDelete.body.error === 'test_set_management_disabled', 'disabled delete should return explicit error');
+
+    const summaryWhileDisabled = await req('GET', '/api/test-sets/' + encodeURIComponent(createdSet.body.id) + '/summary', null, teacherCookie);
+    assert(summaryWhileDisabled.status === 200 && summaryWhileDisabled.body && summaryWhileDisabled.body.totals, 'set summary should remain available while management is disabled');
+
+    await dbRun(
+      'UPDATE system_settings SET value=?, updated_at=? WHERE key=?',
+      ['1', new Date().toISOString(), 'test_sets_management_enabled']
+    );
 
     const updated = await req('PUT', '/api/test-sets/' + encodeURIComponent(createdSet.body.id), {
       name: 'Updated Set ' + unique,

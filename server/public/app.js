@@ -314,6 +314,15 @@
     const [setTestSourceTab, setSetTestSourceTab] = React.useState('public');
     const [textForAI, setTextForAI] = React.useState('');
     const [message, setMessage] = React.useState('');
+    const [freeBetaLimits, setFreeBetaLimits] = React.useState({
+      classes: 2,
+      tests: 3,
+      students: 50,
+      ai_generations_per_month: 15
+    });
+    const [featureFlags, setFeatureFlags] = React.useState({
+      test_sets_management_enabled: false
+    });
     const [questions, setQuestions] = React.useState([]);
     const [modalOpen, setModalOpen] = React.useState(false);
     const [modalQuestions, setModalQuestions] = React.useState([]);
@@ -366,6 +375,11 @@
       open: false,
       testSet: null,
       loading: false
+    });
+    const [planLimitModal, setPlanLimitModal] = React.useState({
+      open: false,
+      limitName: '',
+      limitValue: null
     });
 
     // Student states
@@ -453,6 +467,26 @@
       });
     },[]);
 
+    React.useEffect(function(){
+      fetch('/api/public-config')
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(config){
+          if(config && config.free_beta_limits){
+            setFreeBetaLimits(function(prev){
+              return Object.assign({}, prev, config.free_beta_limits);
+            });
+          }
+          if(config && config.feature_flags){
+            setFeatureFlags(function(prev){
+              return Object.assign({}, prev, config.feature_flags);
+            });
+          }
+        })
+        .catch(function(){});
+    }, []);
+
+    const testSetManagementEnabled = !!featureFlags.test_sets_management_enabled;
+
     function logoutTeacher(){
       fetch('/api/teacher/logout', { method: 'POST' })
         .then(function(){ window.location.href = '/'; })
@@ -520,6 +554,62 @@
       document.addEventListener('keydown', onKeyDown);
       return function(){ document.removeEventListener('keydown', onKeyDown); };
     }, [testSetDeleteModal.open, testSetDeleteModal.loading]);
+
+    React.useEffect(function(){
+      if(!planLimitModal.open) return;
+      function onKeyDown(event){
+        if(event.key === 'Escape'){
+          closePlanLimitModal();
+        }
+      }
+      document.addEventListener('keydown', onKeyDown);
+      return function(){ document.removeEventListener('keydown', onKeyDown); };
+    }, [planLimitModal.open]);
+
+    function closePlanLimitModal(){
+      setPlanLimitModal({
+        open: false,
+        limitName: '',
+        limitValue: null
+      });
+    }
+
+    function openPlanLimitModal(limitName){
+      var normalizedLimitName = typeof limitName === 'string' ? limitName.trim() : '';
+      var rawLimitValue = Object.prototype.hasOwnProperty.call(freeBetaLimits || {}, normalizedLimitName)
+        ? freeBetaLimits[normalizedLimitName]
+        : null;
+      var limitValue = rawLimitValue == null ? null : Number(rawLimitValue);
+      setPlanLimitModal({
+        open: true,
+        limitName: normalizedLimitName,
+        limitValue: Number.isFinite(limitValue) ? limitValue : null
+      });
+    }
+
+    function getPlanLimitModalCopy(){
+      if(planLimitModal.limitName === 'classes'){
+        return {
+          title: 'クラス数の上限に達しました',
+          body: planLimitModal.limitValue != null
+            ? 'ベータ版でのクラス追加は' + planLimitModal.limitValue + '件までです。'
+            : 'ベータ版でのクラス追加は上限までです。'
+        };
+      }
+      if(planLimitModal.limitName === 'tests'){
+        return {
+          title: 'テスト数の上限に達しました',
+          body: planLimitModal.limitValue != null
+            ? 'ベータ版でのテスト作成は' + planLimitModal.limitValue + '件までです。'
+            : 'ベータ版でのテスト作成は上限までです。'
+        };
+      }
+      return {
+        title: '利用上限に達しました',
+        body: 'ベータ版でのご利用は上限までです。'
+      };
+    }
+
     function createClass(){
       const name = (className || '').trim();
       if(!name){
@@ -532,12 +622,16 @@
       }
       fetch('/api/classes',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: name})})
         .then(async r => {
+          const j = await r.json().catch(()=>({ error: '登録に失敗しました' }));
           if(!r.ok){
-            const j = await r.json().catch(()=>({ error: '登録に失敗しました' }));
+            if(j && j.error === 'plan_limit_exceeded'){
+              openPlanLimitModal(j.limit || 'classes');
+              return null;
+            }
             window.alert(j.error || '登録に失敗しました');
             return null;
           }
-          return r.json();
+          return j;
         })
         .then(n=>{ if(n){ setClasses(prev=>prev.concat(n)); setClassName(''); } });
     }
@@ -617,7 +711,27 @@
         return;
       }
       const selectedClassIds = selectedClass ? [selectedClass.id] : [];
-      fetch('/api/tests',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({class_ids:selectedClassIds, class_id:selectedClass?selectedClass.id:null, name:testName, public: testPublic, randomize: testRandomize, answer_mode: testAnswerMode, teacher_note: ''})}).then(r=>r.json()).then(n=>{ setTests(prev=>prev.concat(Object.assign({id:n.id, name:testName, class_id:selectedClass?selectedClass.id:null, class_ids:selectedClassIds, assigned_classes:selectedClass ? [{ id: selectedClass.id, name: selectedClass.name }] : [], public: testPublic?1:0, randomize: testRandomize?1:0, answer_mode: n && n.answer_mode ? n.answer_mode : testAnswerMode, archived: 0, teacher_note: ''}, n || {}))); setTestName(''); setTestPublic(false); setTestRandomize(false); setTestAnswerMode('deferred_summary'); });
+      fetch('/api/tests',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({class_ids:selectedClassIds, class_id:selectedClass?selectedClass.id:null, name:testName, public: testPublic, randomize: testRandomize, answer_mode: testAnswerMode, teacher_note: ''})})
+        .then(async function(r){
+          const n = await r.json().catch(function(){ return { error: '登録に失敗しました' }; });
+          if(!r.ok){
+            if(n && n.error === 'plan_limit_exceeded'){
+              openPlanLimitModal(n.limit || 'tests');
+              return null;
+            }
+            window.alert((n && n.error) || '登録に失敗しました');
+            return null;
+          }
+          return n;
+        })
+        .then(function(n){
+          if(!n) return;
+          setTests(prev=>prev.concat(Object.assign({id:n.id, name:testName, class_id:selectedClass?selectedClass.id:null, class_ids:selectedClassIds, assigned_classes:selectedClass ? [{ id: selectedClass.id, name: selectedClass.name }] : [], public: testPublic?1:0, randomize: testRandomize?1:0, answer_mode: n && n.answer_mode ? n.answer_mode : testAnswerMode, archived: 0, teacher_note: ''}, n || {})));
+          setTestName('');
+          setTestPublic(false);
+          setTestRandomize(false);
+          setTestAnswerMode('deferred_summary');
+        });
     }
     function toggleSetClassId(classId){
       const id = String(classId);
@@ -632,6 +746,10 @@
       });
     }
     function createTestSet(){
+      if(!testSetManagementEnabled){
+        setMessage('まとめ配布の作成は管理画面で無効化されています');
+        return;
+      }
       const name = (setName || '').trim();
       if(!name){
         window.alert('まとめ名を入力してください');
@@ -672,6 +790,10 @@
       });
     }
     function toggleTestSetPublic(testSet){
+      if(!testSetManagementEnabled){
+        setMessage('まとめ配布の更新は管理画面で無効化されています');
+        return;
+      }
       fetch('/api/test-sets/' + encodeURIComponent(testSet.id), {
         method: 'PUT',
         headers: {'Content-Type':'application/json'},
@@ -682,6 +804,10 @@
       }).catch(function(){ setMessage('まとめ配布の公開設定を更新できませんでした'); });
     }
     function archiveTestSet(testSet){
+      if(!testSetManagementEnabled){
+        setMessage('まとめ配布の更新は管理画面で無効化されています');
+        return;
+      }
       fetch('/api/test-sets/' + encodeURIComponent(testSet.id), {
         method: 'PUT',
         headers: {'Content-Type':'application/json'},
@@ -710,6 +836,11 @@
       const modal = testSetDeleteModal;
       const testSet = modal.testSet;
       if(!testSet || modal.loading) return;
+      if(!testSetManagementEnabled){
+        setMessage('まとめ配布の削除は管理画面で無効化されています');
+        closeTestSetDeleteModal();
+        return;
+      }
       setTestSetDeleteModal(function(prev){ return Object.assign({}, prev, { loading: true }); });
       fetch('/api/test-sets/' + encodeURIComponent(testSet.id), { method: 'DELETE' }).then(function(r){
         if(!r.ok) throw new Error('delete_failed');
@@ -1293,85 +1424,91 @@
     const selectedArchivedClassCard = selectedScopeClassCard;
 
     function renderTeacherSetCard(){
+      const showDisabledSetMessage = !testSetManagementEnabled;
+      const showEmptyTestSetState = testSetManagementEnabled && !testSets.length;
       return e('section', { id: 'teacher-set-card', className: 'task-section-card teacher-set-card' },
         e('div', { className: 'task-section-heading' },
           e('div', { 'data-title-icon': 'assign' },
             e('h2', null, 'まとめ配布を作成'),
-            e('p', { className: 'section-note' }, '複数のテストを1つの学習メニューとして配布します。')
+            e('p', { className: 'section-note' }, showDisabledSetMessage
+              ? '管理画面で無効化されています。既存のまとめ配布は確認できます。'
+              : '複数のテストを1つの学習メニューとして配布します。')
           ),
           e('span', { className: 'task-chip task-chip-muted' }, testSets.filter(function(s){ return !s.archived; }).length + '件')
         ),
-        e('div', { className: 'task-form-stack teacher-set-form' },
-          e('input', { value: setName, onChange: function(ev){ setSetName(ev.target.value); }, placeholder: '例: 1学期まとめ', 'aria-label': 'まとめ配布名' }),
-          e('textarea', { value: setDescription, onChange: function(ev){ setSetDescription(ev.target.value); }, rows: 2, maxLength: 1000, placeholder: '説明（任意）', 'aria-label': 'まとめ配布説明' }),
-          e('label', { className: 'task-toggle' }, e('input', { type: 'checkbox', checked: setPublic, onChange: function(ev){ setSetPublic(!!ev.target.checked); } }), e('span', null, '公開する')),
-          e('div', { className: 'teacher-set-pickers' },
-            e('div', { className: 'teacher-set-picker' },
-              e('div', { className: 'teacher-set-picker__header' },
-                e('strong', null, '配布先クラス'),
-                classes.length ? e('span', { className: 'section-note' }, setClassIds.length ? (setClassIds.length + '件選択中') : '未選択') : null
-              ),
-              classes.length
-                ? e('div', { className: 'teacher-set-choice-grid', role: 'group', 'aria-label': '配布先クラス' }, classes.map(function(c){
-                    const checked = setClassIds.indexOf(String(c.id)) !== -1;
-                    return e('button', {
-                      key: c.id,
+        testSetManagementEnabled
+          ? e('div', { className: 'task-form-stack teacher-set-form' },
+              e('input', { value: setName, onChange: function(ev){ setSetName(ev.target.value); }, placeholder: '例: 1学期まとめ', 'aria-label': 'まとめ配布名' }),
+              e('textarea', { value: setDescription, onChange: function(ev){ setSetDescription(ev.target.value); }, rows: 2, maxLength: 1000, placeholder: '説明（任意）', 'aria-label': 'まとめ配布説明' }),
+              e('label', { className: 'task-toggle' }, e('input', { type: 'checkbox', checked: setPublic, onChange: function(ev){ setSetPublic(!!ev.target.checked); } }), e('span', null, '公開する')),
+              e('div', { className: 'teacher-set-pickers' },
+                e('div', { className: 'teacher-set-picker' },
+                  e('div', { className: 'teacher-set-picker__header' },
+                    e('strong', null, '配布先クラス'),
+                    classes.length ? e('span', { className: 'section-note' }, setClassIds.length ? (setClassIds.length + '件選択中') : '未選択') : null
+                  ),
+                  classes.length
+                    ? e('div', { className: 'teacher-set-choice-grid', role: 'group', 'aria-label': '配布先クラス' }, classes.map(function(c){
+                        const checked = setClassIds.indexOf(String(c.id)) !== -1;
+                        return e('button', {
+                          key: c.id,
+                          type: 'button',
+                          className: checked ? 'teacher-set-choice-button is-selected' : 'teacher-set-choice-button',
+                          onClick: function(){ toggleSetClassId(c.id); },
+                          'aria-pressed': checked
+                        },
+                          e('span', { className: 'teacher-set-choice-button__title' }, c.name),
+                          e('span', { className: 'teacher-set-choice-button__meta' }, checked ? '選択中' : '押して追加')
+                        );
+                      }))
+                    : e('p', { className: 'section-note' }, '先にクラスを作成してください。')
+                ),
+                e('div', { className: 'teacher-set-picker' },
+                  e('div', { className: 'teacher-set-picker__header' },
+                    e('strong', null, '含めるテスト'),
+                    e('span', { className: 'section-note' }, setTestIds.length ? (setTestIds.length + '件選択中') : '未選択')
+                  ),
+                  e('div', { className: 'teacher-set-tabs', role: 'tablist', 'aria-label': '含めるテストの表示切替' },
+                    e('button', {
                       type: 'button',
-                      className: checked ? 'teacher-set-choice-button is-selected' : 'teacher-set-choice-button',
-                      onClick: function(){ toggleSetClassId(c.id); },
-                      'aria-pressed': checked
-                    },
-                      e('span', { className: 'teacher-set-choice-button__title' }, c.name),
-                      e('span', { className: 'teacher-set-choice-button__meta' }, checked ? '選択中' : '押して追加')
-                    );
-                  }))
-                : e('p', { className: 'section-note' }, '先にクラスを作成してください。')
-            ),
-            e('div', { className: 'teacher-set-picker' },
-              e('div', { className: 'teacher-set-picker__header' },
-                e('strong', null, '含めるテスト'),
-                e('span', { className: 'section-note' }, setTestIds.length ? (setTestIds.length + '件選択中') : '未選択')
-              ),
-              e('div', { className: 'teacher-set-tabs', role: 'tablist', 'aria-label': '含めるテストの表示切替' },
-                e('button', {
-                  type: 'button',
-                  role: 'tab',
-                  className: setTestSourceTab === 'public' ? 'mode-tab is-active' : 'mode-tab',
-                  onClick: function(){ setSetTestSourceTab('public'); },
-                  'aria-selected': setTestSourceTab === 'public'
-                }, '公開中'),
-                e('button', {
-                  type: 'button',
-                  role: 'tab',
-                  className: setTestSourceTab === 'archived' ? 'mode-tab is-active' : 'mode-tab',
-                  onClick: function(){ setSetTestSourceTab('archived'); },
-                  'aria-selected': setTestSourceTab === 'archived'
-                }, 'アーカイブ済み')
-              ),
-              visibleSetCandidateTests.length
-                ? e('div', { className: 'teacher-set-choice-grid teacher-set-choice-grid--tests' }, visibleSetCandidateTests.map(function(t){
-                    const checked = setTestIds.indexOf(String(t.id)) !== -1;
-                    return e('button', {
-                      key: t.id,
+                      role: 'tab',
+                      className: setTestSourceTab === 'public' ? 'mode-tab is-active' : 'mode-tab',
+                      onClick: function(){ setSetTestSourceTab('public'); },
+                      'aria-selected': setTestSourceTab === 'public'
+                    }, '公開中'),
+                    e('button', {
                       type: 'button',
-                      className: checked ? 'teacher-set-choice-button is-selected' : 'teacher-set-choice-button',
-                      onClick: function(){ toggleSetTestId(t.id); },
-                      'aria-pressed': checked
-                    },
-                      e('span', { className: 'teacher-set-choice-button__title' }, t.name),
-                      e('span', { className: 'teacher-set-choice-button__meta' }, getAssignmentLabel(t, classes) + ' / ' + (testQuestionCounts[t.id] || 0) + '問'),
-                      e('span', { className: 'teacher-set-choice-button__badges' },
-                        setTestSourceTab === 'archived'
-                          ? e('span', { className: 'badge badge-muted' }, 'アーカイブ済み')
-                          : e('span', { className: 'badge badge-success' }, '公開中')
-                      )
-                    );
-                  }))
-                : e('p', { className: 'section-note' }, setTestSourceTab === 'archived' ? 'アーカイブ済みテストはありません。' : '公開中のテストはありません。')
+                      role: 'tab',
+                      className: setTestSourceTab === 'archived' ? 'mode-tab is-active' : 'mode-tab',
+                      onClick: function(){ setSetTestSourceTab('archived'); },
+                      'aria-selected': setTestSourceTab === 'archived'
+                    }, 'アーカイブ済み')
+                  ),
+                  visibleSetCandidateTests.length
+                    ? e('div', { className: 'teacher-set-choice-grid teacher-set-choice-grid--tests' }, visibleSetCandidateTests.map(function(t){
+                        const checked = setTestIds.indexOf(String(t.id)) !== -1;
+                        return e('button', {
+                          key: t.id,
+                          type: 'button',
+                          className: checked ? 'teacher-set-choice-button is-selected' : 'teacher-set-choice-button',
+                          onClick: function(){ toggleSetTestId(t.id); },
+                          'aria-pressed': checked
+                        },
+                          e('span', { className: 'teacher-set-choice-button__title' }, t.name),
+                          e('span', { className: 'teacher-set-choice-button__meta' }, getAssignmentLabel(t, classes) + ' / ' + (testQuestionCounts[t.id] || 0) + '問'),
+                          e('span', { className: 'teacher-set-choice-button__badges' },
+                            setTestSourceTab === 'archived'
+                              ? e('span', { className: 'badge badge-muted' }, 'アーカイブ済み')
+                              : e('span', { className: 'badge badge-success' }, '公開中')
+                          )
+                        );
+                      }))
+                    : e('p', { className: 'section-note' }, setTestSourceTab === 'archived' ? 'アーカイブ済みテストはありません。' : '公開中のテストはありません。')
+                )
+              ),
+              e('button', { onClick: createTestSet, className: 'btn btn-primary', type: 'button' }, 'まとめ配布を作成')
             )
-          ),
-          e('button', { onClick: createTestSet, className: 'btn btn-primary', type: 'button' }, 'まとめ配布を作成')
-        ),
+          : null,
         testSets.length ? e('div', { className: 'teacher-set-list' }, testSets.filter(function(s){ return !s.archived; }).map(function(s){
           return e('article', { key: s.id, className: 'teacher-set-row' },
             e('div', null,
@@ -1379,13 +1516,13 @@
               e('p', { className: 'section-note' }, getSetAssignmentLabel(s, classes) + ' / ' + ((s.items || []).length) + 'テスト')
             ),
             e('div', { className: 'teacher-set-row__actions' },
-              e('button', { className: 'btn btn-small btn-ghost', type: 'button', onClick: function(){ toggleTestSetPublic(s); } }, s.public ? '下書きへ' : '公開'),
+              e('button', { className: 'btn btn-small btn-ghost', type: 'button', onClick: function(){ toggleTestSetPublic(s); }, disabled: !testSetManagementEnabled }, s.public ? '下書きへ' : '公開'),
               e('button', { className: 'btn btn-small btn-secondary', type: 'button', onClick: function(){ openSetQrShareModal(s); }, disabled: !s.public || !getSetClassIds(s).length }, '共有QR'),
-              e('button', { className: 'btn btn-small btn-ghost', type: 'button', onClick: function(){ archiveTestSet(s); } }, 'アーカイブ'),
-              e('button', { className: 'btn btn-small btn-ghost', type: 'button', onClick: function(){ deleteTestSet(s); } }, '削除')
+              e('button', { className: 'btn btn-small btn-ghost', type: 'button', onClick: function(){ archiveTestSet(s); }, disabled: !testSetManagementEnabled }, 'アーカイブ'),
+              e('button', { className: 'btn btn-small btn-ghost', type: 'button', onClick: function(){ deleteTestSet(s); }, disabled: !testSetManagementEnabled }, '削除')
             )
           );
-        })) : e('div', { className: 'task-empty' }, 'まとめ配布はまだありません')
+        })) : (showEmptyTestSetState ? e('div', { className: 'task-empty' }, 'まとめ配布はまだありません') : null)
       );
     }
     const publicTestsCount = tests.filter(function(t){ return !!t.public; }).length;
@@ -1425,7 +1562,7 @@
     const teacherNode = e('section', { className: 'task-page teacher-dashboard-page' },
       e('div', { className: 'task-page-hero compact teacher-page-hero teacher-operations-header' },
         e('div', { className: 'teacher-page-hero__intro' },
-          e('p', { className: 'eyebrow' }, '教員メニュー'),
+          e('p', { className: 'eyebrow' }, '先生メニュー'),
           e('h1', null, 'テスト準備ダッシュボード'),
           e('p', { className: 'lead' }, '準備フローを参考に、テストの準備・配布を行います。')
         ),
@@ -1438,7 +1575,7 @@
             e('span', { className: 'teacher-page-flow__kicker' }, '準備フロー')
           ),
           e('div', { className: 'teacher-page-flow__lane' },
-            e('ol', { className: 'teacher-page-flow__list', 'aria-label': '教師メニューの準備フロー' }, teacherFlowSteps.map(function(step){
+            e('ol', { className: 'teacher-page-flow__list', 'aria-label': '先生メニューの準備フロー' }, teacherFlowSteps.map(function(step){
               return e('li', { key: step.key, className: step.items ? 'teacher-page-flow__step is-detailed' : 'teacher-page-flow__step' },
                 e('div', { className: 'teacher-page-flow__step-top' },
                   e('span', { className: 'teacher-page-flow__step-index', 'aria-hidden': true }, step.step),
@@ -1733,7 +1870,7 @@
                   ),
                   e('div', { className: 'teacher-test-note-editor' },
                     e('div', { className: 'teacher-test-note-editor__header' },
-                      e('label', { htmlFor: 'teacher-note-' + t.id }, '教師メモ'),
+                      e('label', { htmlFor: 'teacher-note-' + t.id }, '先生メモ'),
                       e('span', { className: 'teacher-test-note-editor__count' }, String(teacherNoteDraft.length) + '/1000')
                     ),
                     e('textarea', {
@@ -1880,6 +2017,24 @@
           e('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 } },
             e('button', { className: 'btn btn-ghost', type: 'button', onClick: closeTestSetDeleteModal, disabled: testSetDeleteModal.loading }, 'キャンセル'),
             e('button', { className: 'btn btn-primary', type: 'button', onClick: confirmTestSetDelete, disabled: testSetDeleteModal.loading }, testSetDeleteModal.loading ? '削除中...' : '削除する')
+          )
+        )
+      ) : null,
+
+      planLimitModal.open ? e('div', {
+        className: 'modal modal-centered',
+        role: 'dialog',
+        'aria-modal': true,
+        'aria-labelledby': 'plan-limit-modal-title',
+        style: { background: 'rgba(9,16,26,0.56)' },
+        onClick: function(event){ if(event.target === event.currentTarget) closePlanLimitModal(); }
+      },
+        e('div', { className: 'modal-panel', onClick: function(event){ event.stopPropagation(); } },
+          e('h3', { id: 'plan-limit-modal-title' }, getPlanLimitModalCopy().title),
+          e('p', null, getPlanLimitModalCopy().body),
+          e('p', { className: 'task-helper-text', style: { marginTop: 8 } }, '現在のベータ版の利用上限に達しています。'),
+          e('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 } },
+            e('button', { className: 'btn btn-primary', type: 'button', onClick: closePlanLimitModal }, '閉じる')
           )
         )
       ) : null,
@@ -3054,10 +3209,10 @@
     }
 
     const workspaceMeta = mode === 'reports'
-      ? { eyebrow: '教員メニュー', title: '成績分析', description: '受験結果の確認' }
+      ? { eyebrow: '先生メニュー', title: '成績分析', description: '受験結果の確認' }
       : (mode === 'student'
-        ? { eyebrow: '教員メニュー', title: '生徒画面プレビュー', description: '配布前の表示確認' }
-        : { eyebrow: '教員メニュー', title: 'テスト準備', description: 'テストの作成と管理' });
+        ? { eyebrow: '先生メニュー', title: '生徒画面プレビュー', description: '配布前の表示確認' }
+        : { eyebrow: '先生メニュー', title: 'テスト準備', description: 'テストの作成と管理' });
     const teacherDisplayName = teacherUser && typeof teacherUser.display_name === 'string'
       ? teacherUser.display_name.trim()
       : '';
@@ -3087,8 +3242,8 @@
                   e('span', null, 'テスト作成・配布・採点')
               )
             ),
-            teacherHeaderName ? e('div', { className: 'app-brand-teacher', 'aria-label': 'ログイン中の教師' },
-              e('span', { className: 'app-brand-teacher__label' }, '担当教師'),
+            teacherHeaderName ? e('div', { className: 'app-brand-teacher', 'aria-label': 'ログイン中の先生' },
+              e('span', { className: 'app-brand-teacher__label' }, '担当先生'),
               e('strong', { className: 'app-brand-teacher__name' }, teacherHeaderName),
               teacherDisplayName && teacherUsername && teacherDisplayName !== teacherUsername
                 ? e('span', { className: 'app-brand-teacher__meta' }, '@' + teacherUsername)

@@ -25,12 +25,45 @@ const teacherSessionMaxAgeSec = 60 * 60 * 24 * 14;
 const oauthStateMaxAgeSec = 60 * 10;
 const oauthStates = new Map();
 
-const freeBetaLimits = {
-  classes: parseInt(process.env.FREE_BETA_CLASS_LIMIT, 10) || 10,
-  tests: parseInt(process.env.FREE_BETA_TEST_LIMIT, 10) || 100,
-  students: parseInt(process.env.FREE_BETA_STUDENT_LIMIT, 10) || 500,
-  ai_generations_per_month: parseInt(process.env.FREE_BETA_AI_GENERATION_LIMIT, 10) || 50
-};
+function parseConfiguredLimit(value, fallback){
+  const parsed = parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+const defaultPlanDefinitions = Object.freeze({
+  free_beta: Object.freeze({
+    code: 'free_beta',
+    display_name: '無料ベータ',
+    limits: Object.freeze({
+      classes: parseConfiguredLimit(process.env.FREE_BETA_CLASS_LIMIT, 2),
+      tests: parseConfiguredLimit(process.env.FREE_BETA_TEST_LIMIT, 3),
+      students: parseConfiguredLimit(process.env.FREE_BETA_STUDENT_LIMIT, 50),
+      ai_generations_per_month: parseConfiguredLimit(process.env.FREE_BETA_AI_GENERATION_LIMIT, 15)
+    })
+  })
+});
+
+const unlimitedPlanLimits = Object.freeze({
+  classes: null,
+  tests: null,
+  students: null,
+  ai_generations_per_month: null
+});
+
+const systemSettingDefinitions = Object.freeze({
+  feedback_form_url: Object.freeze({
+    key: 'feedback_form_url',
+    type: 'string',
+    defaultValue: '',
+    public: true
+  }),
+  test_sets_management_enabled: Object.freeze({
+    key: 'test_sets_management_enabled',
+    type: 'boolean',
+    defaultValue: false,
+    public: true
+  })
+});
 
 function isProductionRuntime(){
   return process.env.NODE_ENV === 'production' || /^https:\/\//i.test(process.env.APP_BASE_URL || process.env.GOOGLE_REDIRECT_URI || '');
@@ -311,6 +344,162 @@ function dbRunAsync(sql, params){
   });
 }
 
+function buildPlanDefinition(row, planCode){
+  const normalizedCode = String((row && row.code) || planCode || '').trim() || 'free_beta';
+  const fallback = defaultPlanDefinitions[normalizedCode] || null;
+  return {
+    code: normalizedCode,
+    display_name: String((row && row.display_name) || (fallback && fallback.display_name) || normalizedCode),
+    active: row && row.active != null ? Number(row.active) : 1,
+    limits: {
+      classes: row && row.classes_limit != null ? Number(row.classes_limit) : (fallback ? fallback.limits.classes : unlimitedPlanLimits.classes),
+      tests: row && row.tests_limit != null ? Number(row.tests_limit) : (fallback ? fallback.limits.tests : unlimitedPlanLimits.tests),
+      students: row && row.students_limit != null ? Number(row.students_limit) : (fallback ? fallback.limits.students : unlimitedPlanLimits.students),
+      ai_generations_per_month: row && row.ai_generations_per_month_limit != null ? Number(row.ai_generations_per_month_limit) : (fallback ? fallback.limits.ai_generations_per_month : unlimitedPlanLimits.ai_generations_per_month)
+    }
+  };
+}
+
+async function getPlanDefinition(planCode){
+  const normalizedCode = String(planCode || '').trim() || 'free_beta';
+  const row = await dbGetAsync(
+    `SELECT code, display_name, classes_limit, tests_limit, students_limit, ai_generations_per_month_limit, active
+       FROM plans
+      WHERE code=?`,
+    [normalizedCode]
+  );
+  return buildPlanDefinition(row || null, normalizedCode);
+}
+
+async function listPlanDefinitions(){
+  const rows = await dbAllAsync(
+    `SELECT code, display_name, classes_limit, tests_limit, students_limit, ai_generations_per_month_limit, active
+       FROM plans
+      ORDER BY code ASC`
+  );
+  const plans = (rows || []).map(row => buildPlanDefinition(row, row.code));
+  if(!plans.some(plan => plan.code === 'free_beta')){
+    plans.unshift(buildPlanDefinition(null, 'free_beta'));
+  }
+  return plans;
+}
+
+function normalizeBooleanSettingValue(value, fallback){
+  if(value === true || value === 1 || value === '1' || value === 'true' || value === 'on') return '1';
+  if(value === false || value === 0 || value === '0' || value === 'false' || value === 'off') return '0';
+  return fallback;
+}
+
+function parseSystemSettingOutput(definition, rawValue){
+  if(definition && definition.type === 'boolean'){
+    return normalizeBooleanSettingValue(rawValue, definition.defaultValue ? '1' : '0') === '1';
+  }
+  return rawValue;
+}
+
+function parseSystemSettingInput(settingKey, value){
+  const definition = systemSettingDefinitions[settingKey];
+  if(!definition){
+    const err = new Error('unknown_setting');
+    err.statusCode = 404;
+    throw err;
+  }
+  if(definition.type === 'boolean'){
+    const normalized = normalizeBooleanSettingValue(value, null);
+    if(normalized == null){
+      const err = new Error('invalid_boolean_setting');
+      err.statusCode = 400;
+      throw err;
+    }
+    return normalized;
+  }
+  return String(value == null ? '' : value);
+}
+
+async function ensureSystemSetting(settingKey){
+  const definition = systemSettingDefinitions[settingKey];
+  if(!definition){
+    const err = new Error('unknown_setting');
+    err.statusCode = 404;
+    throw err;
+  }
+  const defaultValue = definition.type === 'boolean'
+    ? (definition.defaultValue ? '1' : '0')
+    : String(definition.defaultValue == null ? '' : definition.defaultValue);
+  const nowIso = new Date().toISOString();
+  await dbRunAsync(
+    `INSERT OR IGNORE INTO system_settings (key, value, created_at, updated_at)
+     VALUES (?,?,?,?)`,
+    [settingKey, defaultValue, nowIso, nowIso]
+  );
+}
+
+async function getSystemSetting(settingKey){
+  const definition = systemSettingDefinitions[settingKey];
+  if(!definition){
+    const err = new Error('unknown_setting');
+    err.statusCode = 404;
+    throw err;
+  }
+  await ensureSystemSetting(settingKey);
+  const row = await dbGetAsync('SELECT key, value, updated_at FROM system_settings WHERE key=?', [settingKey]);
+  return {
+    key: settingKey,
+    value: parseSystemSettingOutput(definition, row ? row.value : null),
+    updated_at: row ? row.updated_at || null : null
+  };
+}
+
+async function listSystemSettings(options){
+  const opts = options || {};
+  const keys = Object.keys(systemSettingDefinitions).filter(key => opts.includePrivate || systemSettingDefinitions[key].public);
+  if(!keys.length) return [];
+  await Promise.all(keys.map(ensureSystemSetting));
+  const rows = await dbAllAsync(
+    `SELECT key, value, updated_at
+       FROM system_settings
+      WHERE key IN (${keys.map(() => '?').join(',')})
+      ORDER BY key ASC`,
+    keys
+  );
+  const rowMap = new Map((rows || []).map(row => [row.key, row]));
+  return keys.map((key) => {
+    const definition = systemSettingDefinitions[key];
+    const row = rowMap.get(key) || null;
+    return {
+      key: key,
+      value: parseSystemSettingOutput(definition, row ? row.value : null),
+      updated_at: row ? row.updated_at || null : null
+    };
+  });
+}
+
+async function updateSystemSetting(settingKey, value){
+  const nextValue = parseSystemSettingInput(settingKey, value);
+  await ensureSystemSetting(settingKey);
+  await dbRunAsync(
+    'UPDATE system_settings SET value=?, updated_at=? WHERE key=?',
+    [nextValue, new Date().toISOString(), settingKey]
+  );
+  return getSystemSetting(settingKey);
+}
+
+async function isTestSetManagementEnabled(){
+  const setting = await getSystemSetting('test_sets_management_enabled');
+  return !!(setting && setting.value);
+}
+
+function parsePlanLimitInput(limitName, value){
+  if(value == null || value === '') return null;
+  const parsed = parseInt(value, 10);
+  if(!Number.isInteger(parsed) || parsed < 0){
+    const err = new Error(`invalid_${limitName}`);
+    err.statusCode = 400;
+    throw err;
+  }
+  return parsed;
+}
+
 function getGoogleOAuthConfig(){
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -394,10 +583,14 @@ async function getTeacherPlan(teacherId){
   return row && row.plan ? row.plan : 'free_beta';
 }
 
-async function enforceFreeBetaCountLimit(teacherId, limitName, sql, params){
-  const plan = await getTeacherPlan(teacherId);
-  if(plan !== 'free_beta') return;
-  const max = freeBetaLimits[limitName];
+async function getTeacherPlanDefinition(teacherId){
+  const planCode = await getTeacherPlan(teacherId);
+  return getPlanDefinition(planCode);
+}
+
+async function enforcePlanCountLimit(teacherId, limitName, sql, params){
+  const plan = await getTeacherPlanDefinition(teacherId);
+  const max = plan && plan.limits ? plan.limits[limitName] : null;
   if(!max) return;
   const row = await dbGetAsync(sql, params || []);
   const current = row ? Number(row.count || 0) : 0;
@@ -405,12 +598,13 @@ async function enforceFreeBetaCountLimit(teacherId, limitName, sql, params){
     const err = new Error('plan_limit_exceeded');
     err.statusCode = 403;
     err.limitName = limitName;
+    err.planCode = plan.code;
     throw err;
   }
 }
 
 function currentUsageMonth(){
-  return new Date().toISOString().slice(0, 7);
+  return new Date(Date.now() + (9 * 60 * 60 * 1000)).toISOString().slice(0, 7);
 }
 
 async function getMonthlyAiUsage(teacherId){
@@ -419,13 +613,14 @@ async function getMonthlyAiUsage(teacherId){
 }
 
 async function enforceMonthlyAiLimit(teacherId){
-  const plan = await getTeacherPlan(teacherId);
-  if(plan !== 'free_beta') return;
+  const plan = await getTeacherPlanDefinition(teacherId);
   const current = await getMonthlyAiUsage(teacherId);
-  if(current >= freeBetaLimits.ai_generations_per_month){
+  const max = plan && plan.limits ? plan.limits.ai_generations_per_month : null;
+  if(max != null && current >= max){
     const err = new Error('plan_limit_exceeded');
     err.statusCode = 403;
     err.limitName = 'ai_generations_per_month';
+    err.planCode = plan.code;
     throw err;
   }
 }
@@ -575,6 +770,17 @@ function requireAdmin(req, res, next){
   next();
 }
 
+async function requireTestSetManagementEnabled(req, res, next){
+  try{
+    if(!(await isTestSetManagementEnabled())){
+      return res.status(403).json({ error: 'test_set_management_disabled' });
+    }
+    return next();
+  }catch(err){
+    return res.status(err.statusCode || 500).json({ error: err.message });
+  }
+}
+
 function ensureTeacherOwnsClass(req, res, classId, cb){
   db.get('SELECT * FROM classes WHERE id=? AND teacher_id=?', [classId, req.teacher.id], (err, row) => {
     if(err) return res.status(500).json({ error: err.message });
@@ -699,6 +905,27 @@ function normalizeTestSetName(value){
 
 function normalizeTestSetDescription(value){
   return String(value || '').trim().slice(0, 1000);
+}
+
+function normalizeContactRequestName(value){
+  return String(value || '').trim().slice(0, 120);
+}
+
+function normalizeContactRequestEmail(value){
+  return String(value || '').trim().slice(0, 255).toLowerCase();
+}
+
+function isValidEmailAddress(value){
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
+}
+
+function normalizeContactRequestStatus(value){
+  const raw = String(value || '').trim();
+  return ['new', 'in_progress', 'completed'].includes(raw) ? raw : 'new';
+}
+
+function normalizeContactRequestNote(value){
+  return String(value || '').trim().slice(0, 2000);
 }
 
 function normalizeIds(source){
@@ -1197,11 +1424,56 @@ function authorizeSummaryAccess(req, res, testId, studentId, sessionId, cb){
   });
 }
 
-app.get('/api/public-config', (req, res) => {
-  res.json({
-    beta_feedback_url: process.env.BETA_FEEDBACK_URL || '',
-    free_beta_limits: freeBetaLimits
-  });
+app.get('/api/public-config', async (req, res) => {
+  try{
+    const freeBetaPlan = await getPlanDefinition('free_beta');
+    const settings = await listSystemSettings();
+    const featureFlags = settings.reduce((acc, item) => {
+      if(item.key === 'feedback_form_url') return acc;
+      acc[item.key] = item.value;
+      return acc;
+    }, {});
+    const feedbackSetting = settings.find((item) => item && item.key === 'feedback_form_url');
+    res.json({
+      beta_feedback_url: feedbackSetting && typeof feedbackSetting.value === 'string' ? feedbackSetting.value : '',
+      free_beta_limits: freeBetaPlan.limits,
+      feature_flags: featureFlags
+    });
+  }catch(err){
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/contact-requests', async (req, res) => {
+  const name = normalizeContactRequestName(req.body && req.body.name);
+  const email = normalizeContactRequestEmail(req.body && req.body.email);
+  if(!name || !email){
+    return res.status(400).json({ error: 'name_and_email_required' });
+  }
+  if(!isValidEmailAddress(email)){
+    return res.status(400).json({ error: 'invalid_email' });
+  }
+
+  try{
+    const createdAt = new Date().toISOString();
+    const inserted = await dbRunAsync(
+      'INSERT INTO contact_requests (name, email, created_at) VALUES (?,?,?)',
+      [name, email, createdAt]
+    );
+    return res.json({
+      ok: true,
+      request: {
+        id: inserted.lastID,
+        name: name,
+        email: email,
+        status: 'new',
+        admin_note: '',
+        created_at: createdAt
+      }
+    });
+  }catch(err){
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Google OAuth for teacher self-registration/login
@@ -1296,7 +1568,7 @@ app.post('/api/teacher/logout', (req, res) => {
 
 // Admin: teacher user management (manual registration)
 app.get('/api/admin/teachers', requireAdmin, (req, res) => {
-  db.all('SELECT id, username, display_name, active, created_at FROM teachers ORDER BY id DESC', async (err, rows) => {
+  db.all('SELECT id, username, display_name, active, created_at, email, auth_provider, plan FROM teachers ORDER BY id DESC', async (err, rows) => {
     if(err) return res.status(500).json({ error: err.message });
     try{
       const teachers = await Promise.all((rows || []).map(async row => {
@@ -1328,6 +1600,87 @@ app.post('/api/admin/teachers', requireAdmin, (req, res) => {
   );
 });
 
+app.get('/api/admin/plans', requireAdmin, async (req, res) => {
+  try{
+    const plans = await listPlanDefinitions();
+    res.json(plans);
+  }catch(err){
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/settings', requireAdmin, async (req, res) => {
+  try{
+    const settings = await listSystemSettings({ includePrivate: true });
+    res.json(settings);
+  }catch(err){
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/admin/settings/:key', requireAdmin, async (req, res) => {
+  const settingKey = String(req.params.key || '').trim();
+  if(!settingKey) return res.status(400).json({ error: 'setting_key_required' });
+  if(!Object.prototype.hasOwnProperty.call(req.body || {}, 'value')){
+    return res.status(400).json({ error: 'setting_value_required' });
+  }
+  try{
+    const updated = await updateSystemSetting(settingKey, req.body.value);
+    res.json(updated);
+  }catch(err){
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/admin/plans/:code', requireAdmin, async (req, res) => {
+  const code = String(req.params.code || '').trim();
+  if(!code) return res.status(400).json({ error: 'plan_code_required' });
+
+  try{
+    const existing = await dbGetAsync(
+      `SELECT code, display_name, classes_limit, tests_limit, students_limit, ai_generations_per_month_limit, active
+         FROM plans
+        WHERE code=?`,
+      [code]
+    );
+    if(!existing) return res.status(404).json({ error: 'not_found' });
+
+    const body = req.body || {};
+    const nextDisplayName = typeof body.display_name === 'string' && body.display_name.trim()
+      ? body.display_name.trim()
+      : String(existing.display_name || code);
+    const classesLimit = Object.prototype.hasOwnProperty.call(body, 'classes')
+      ? parsePlanLimitInput('classes', body.classes)
+      : (existing.classes_limit != null ? Number(existing.classes_limit) : null);
+    const testsLimit = Object.prototype.hasOwnProperty.call(body, 'tests')
+      ? parsePlanLimitInput('tests', body.tests)
+      : (existing.tests_limit != null ? Number(existing.tests_limit) : null);
+    const studentsLimit = Object.prototype.hasOwnProperty.call(body, 'students')
+      ? parsePlanLimitInput('students', body.students)
+      : (existing.students_limit != null ? Number(existing.students_limit) : null);
+    const aiLimit = Object.prototype.hasOwnProperty.call(body, 'ai_generations_per_month')
+      ? parsePlanLimitInput('ai_generations_per_month', body.ai_generations_per_month)
+      : (existing.ai_generations_per_month_limit != null ? Number(existing.ai_generations_per_month_limit) : null);
+
+    await dbRunAsync(
+      `UPDATE plans
+          SET display_name=?,
+              classes_limit=?,
+              tests_limit=?,
+              students_limit=?,
+              ai_generations_per_month_limit=?,
+              updated_at=?
+        WHERE code=?`,
+      [nextDisplayName, classesLimit, testsLimit, studentsLimit, aiLimit, new Date().toISOString(), code]
+    );
+
+    const updated = await getPlanDefinition(code);
+    res.json(updated);
+  }catch(err){
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 app.put('/api/admin/teachers/:id/password', requireAdmin, (req, res) => {
   const id = req.params.id;
   const { password } = req.body || {};
@@ -1343,16 +1696,30 @@ app.put('/api/admin/teachers/:id/password', requireAdmin, (req, res) => {
 // Update teacher display name
 app.patch('/api/admin/teachers/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
-  const { display_name } = req.body || {};
+  const { display_name, plan } = req.body || {};
   const dn = typeof display_name === 'string' ? display_name.trim() : '';
-  db.run('UPDATE teachers SET display_name=? WHERE id=?', [dn, id], function(err){
-    if(err) return res.status(500).json({ error: err.message });
-    if(!this.changes) return res.status(404).json({ error: 'not_found' });
-    db.get('SELECT id, username, display_name, active, created_at FROM teachers WHERE id=?', [id], (e, row) => {
-      if(e) return res.status(500).json({ error: e.message });
+  (async () => {
+    try{
+      let nextPlan = null;
+      if(typeof plan === 'string' && plan.trim()){
+        nextPlan = plan.trim();
+        const existingPlan = await dbGetAsync('SELECT code FROM plans WHERE code=?', [nextPlan]);
+        if(!existingPlan){
+          return res.status(400).json({ error: 'invalid_plan' });
+        }
+      }
+      const updateSql = nextPlan
+        ? 'UPDATE teachers SET display_name=?, plan=? WHERE id=?'
+        : 'UPDATE teachers SET display_name=? WHERE id=?';
+      const updateParams = nextPlan ? [dn, nextPlan, id] : [dn, id];
+      const result = await dbRunAsync(updateSql, updateParams);
+      if(!result.changes) return res.status(404).json({ error: 'not_found' });
+      const row = await dbGetAsync('SELECT id, username, display_name, active, created_at, plan FROM teachers WHERE id=?', [id]);
       res.json(row || {});
-    });
-  });
+    }catch(err){
+      res.status(err.statusCode || 500).json({ error: err.message });
+    }
+  })();
 });
 
 app.delete('/api/admin/teachers/:id', requireAdmin, (req, res) => {
@@ -1381,6 +1748,58 @@ app.delete('/api/admin/teachers/:id', requireAdmin, (req, res) => {
     .catch(err => {
       res.status(500).json({ error: err.message });
     });
+});
+
+app.get('/api/admin/contact-requests', requireAdmin, async (req, res) => {
+  try{
+    const rows = await dbAllAsync(
+      'SELECT id, name, email, status, admin_note, created_at FROM contact_requests ORDER BY datetime(created_at) DESC, id DESC'
+    );
+    return res.json(rows);
+  }catch(err){
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/admin/contact-requests/:id', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if(!Number.isInteger(id) || id <= 0){
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+  const status = normalizeContactRequestStatus(req.body && req.body.status);
+  const adminNote = normalizeContactRequestNote(req.body && req.body.admin_note);
+  try{
+    const updated = await dbRunAsync(
+      'UPDATE contact_requests SET status=?, admin_note=? WHERE id=?',
+      [status, adminNote, id]
+    );
+    if(!updated.changes){
+      return res.status(404).json({ error: 'not_found' });
+    }
+    const row = await dbGetAsync(
+      'SELECT id, name, email, status, admin_note, created_at FROM contact_requests WHERE id=?',
+      [id]
+    );
+    return res.json(row || {});
+  }catch(err){
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/contact-requests/:id', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if(!Number.isInteger(id) || id <= 0){
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+  try{
+    const removed = await dbRunAsync('DELETE FROM contact_requests WHERE id=?', [id]);
+    if(!removed.changes){
+      return res.status(404).json({ error: 'not_found' });
+    }
+    return res.json({ id: id, deleted: true });
+  }catch(err){
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -1428,7 +1847,7 @@ app.post('/api/classes', requireTeacher, (req, res) => {
   if(name.length > 25) return res.status(400).json({ error: 'name too long' });
   (async () => {
     try{
-      await enforceFreeBetaCountLimit(req.teacher.id, 'classes', 'SELECT COUNT(*) AS count FROM classes WHERE teacher_id=?', [req.teacher.id]);
+      await enforcePlanCountLimit(req.teacher.id, 'classes', 'SELECT COUNT(*) AS count FROM classes WHERE teacher_id=?', [req.teacher.id]);
       const inserted = await dbRunAsync('INSERT INTO classes (teacher_id, name) VALUES (?,?)', [req.teacher.id, name]);
       res.json({ id: inserted.lastID, name });
     }catch(err){
@@ -1633,7 +2052,7 @@ app.get('/api/test-sets/:id', (req, res) => {
   });
 });
 
-app.post('/api/test-sets', requireTeacher, async (req, res) => {
+app.post('/api/test-sets', requireTeacher, requireTestSetManagementEnabled, async (req, res) => {
   const name = normalizeTestSetName(req.body && req.body.name);
   if(!name) return res.status(400).json({ error: 'name required' });
   const description = normalizeTestSetDescription(req.body && req.body.description);
@@ -1660,7 +2079,7 @@ app.post('/api/test-sets', requireTeacher, async (req, res) => {
   }
 });
 
-app.put('/api/test-sets/:id', requireTeacher, async (req, res) => {
+app.put('/api/test-sets/:id', requireTeacher, requireTestSetManagementEnabled, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if(!id) return res.status(400).json({ error: 'invalid_set_id' });
   const current = await dbGetAsync('SELECT * FROM test_sets WHERE id=? AND teacher_id=?', [id, req.teacher.id]).catch(err => {
@@ -1704,7 +2123,7 @@ app.put('/api/test-sets/:id', requireTeacher, async (req, res) => {
   }
 });
 
-app.delete('/api/test-sets/:id', requireTeacher, async (req, res) => {
+app.delete('/api/test-sets/:id', requireTeacher, requireTestSetManagementEnabled, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if(!id) return res.status(400).json({ error: 'invalid_set_id' });
   try{
@@ -1837,7 +2256,7 @@ app.post('/api/tests', requireTeacher, async (req, res) => {
   const teacherNote = normalizeTeacherNote(teacher_note);
   const classIds = normalizeClassIdsFromBody(req.body || {});
   try{
-    await enforceFreeBetaCountLimit(req.teacher.id, 'tests', 'SELECT COUNT(*) AS count FROM tests WHERE teacher_id=?', [req.teacher.id]);
+    await enforcePlanCountLimit(req.teacher.id, 'tests', 'SELECT COUNT(*) AS count FROM tests WHERE teacher_id=?', [req.teacher.id]);
     await ensureTeacherOwnsClassesAsync(req.teacher.id, classIds);
     const representativeClassId = classIds.length ? classIds[0] : null;
     const inserted = await dbRunAsync(
@@ -2190,7 +2609,7 @@ app.post('/api/students', (req, res) => {
     (async () => {
       try{
         if(cls.teacher_id){
-          await enforceFreeBetaCountLimit(
+          await enforcePlanCountLimit(
             cls.teacher_id,
             'students',
             'SELECT COUNT(*) AS count FROM students WHERE class_id IN (SELECT id FROM classes WHERE teacher_id=?)',
