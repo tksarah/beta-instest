@@ -47,13 +47,10 @@
 .landing-brand-mark{
   width:36px;
   height:36px;
-  display:grid;
-  place-items:center;
+  display:block;
   border-radius:8px;
-  background:#1f6feb;
-  color:#fff;
-  font-size:13px;
-  letter-spacing:.04em;
+  object-fit:cover;
+  box-shadow:0 8px 18px rgba(31,111,235,.18);
 }
 
 .landing-links{
