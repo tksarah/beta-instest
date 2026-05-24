@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>InstantTest | 教師ユーザー管理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .admin-page{display:grid;gap:18px}
+    .admin-two-column{display:grid;grid-template-columns:minmax(280px,420px) minmax(0,1fr);gap:18px;align-items:start}
+    .admin-panel{background:var(--bg-panel);border:1px solid var(--border-soft);border-radius:24px;box-shadow:var(--shadow-soft);padding:22px}
+    .admin-panel h2{font-size:22px;margin-bottom:6px}
+    .admin-panel p{color:var(--text-muted)}
+    .admin-form{display:grid;gap:14px;margin-top:18px}
+    .admin-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .admin-form-grid .admin-field--full{grid-column:1 / -1}
+    .admin-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .admin-list-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap}
+    .admin-list-summary{display:flex;gap:10px;flex-wrap:wrap}
+    .admin-pill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:8px 12px;background:var(--color-accent-soft);color:var(--color-main);font-size:13px;font-weight:700}
+    .teacher-list-grid{display:grid;gap:14px}
+    .teacher-card{display:grid;gap:8px;padding:10px 14px;border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(250,251,252,.98));border:1px solid rgba(24,50,74,.04);box-shadow:0 4px 10px rgba(24,50,74,.04);font-size:13px;line-height:1.15}
+    .teacher-card-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+    .teacher-card-title{display:flex;flex-direction:column;gap:2px}
+    .teacher-card-title strong{font-size:15px;line-height:1.1;letter-spacing:.2px}
+    .teacher-card-title span{color:var(--text-soft);font-size:12px}
+    .teacher-card-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .teacher-metric{padding:6px 8px;border-radius:10px;background:var(--bg-soft);border:1px solid rgba(24,50,74,.04);min-width:56px;text-align:center}
+    .teacher-metric strong{display:block;font-size:14px;color:var(--color-main);line-height:1.05}
+    .teacher-metric span{display:block;margin-top:2px;color:var(--text-soft);font-size:11px}
+    .teacher-card-foot{display:flex;justify-content:flex-start;align-items:center;gap:8px;flex-wrap:wrap}
+    .teacher-card-foot p{font-size:12px;color:var(--text-soft);margin:0}
+    .btn-danger{background:#fff4ee;color:#9a3412;border-color:rgba(221,107,32,.25)}
+    .btn-danger:hover{background:#ffe7d9}
+    .admin-empty{padding:24px;text-align:center;border-radius:22px;background:var(--bg-soft);border:1px dashed rgba(24,50,74,.16);color:var(--text-muted)}
+    @media (max-width:900px){.admin-two-column,.admin-form-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">本文へスキップ</a>
+  <main id="main-content" class="container">
+    <header class="app-topbar" role="banner">
+      <div class="app-brand" role="heading" aria-level="1">
+        <div class="app-brand-mark">IT</div>
+        <div class="app-brand-copy"><strong>InstantTest</strong><span>教師ユーザー管理</span></div>
+      </div>
+      <div class="app-topbar-actions">
+        <button id="admin-clear" class="btn btn-ghost" type="button">管理者承認を解除</button>
+        <a class="btn btn-ghost" href="/">トップへ</a>
+      </div>
+    </header>
+
+    <div class="admin-page">
+      <section class="task-page-hero compact" aria-labelledby="admin-page-title">
+        <div>
+          <div class="eyebrow">Teacher Console</div>
+          <h1 id="admin-page-title">教師ユーザーの追加と完全削除</h1>
+          <p class="lead">サービス提供者専用の管理画面です。教師ユーザーの追加、表示名変更、パスワード更新、関連データを含む削除を行えます。</p>
+        </div>
+      </section>
+
+      <div class="admin-two-column">
+        <section class="admin-panel" aria-labelledby="teacher-create-title">
+          <h2 id="teacher-create-title">教師ユーザーを追加</h2>
+          <p>既存ID/パスワードログイン用の教師アカウントを作成します。Googleログイン利用者は初回ログイン時に自動登録されます。</p>
+          <form id="teacher-create-form" class="admin-form">
+            <div class="admin-form-grid">
+              <div>
+                <label for="teacher-username">ユーザー名</label>
+                <input id="teacher-username" type="text" autocomplete="off" required />
+              </div>
+              <div>
+                <label for="teacher-display-name">表示名</label>
+                <input id="teacher-display-name" type="text" autocomplete="off" />
+              </div>
+              <div class="admin-field--full">
+                <label for="teacher-password">初期パスワード</label>
+                <input id="teacher-password" type="password" autocomplete="new-password" required />
+              </div>
+            </div>
+            <div class="admin-actions">
+              <button class="btn btn-primary" type="submit">追加する</button>
+            </div>
+            <div id="teacher-create-message" class="status-message" aria-live="polite"></div>
+          </form>
+        </section>
+
+        <section class="admin-panel" aria-labelledby="admin-status-title">
+          <h2 id="admin-status-title">管理者承認済み</h2>
+          <p>この画面の操作は、ログイン画面で承認した管理者パスワードを使って実行されます。共用端末では作業後に承認を解除してください。</p>
+          <div id="admin-auth-message" class="status-message" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <section class="admin-panel" aria-labelledby="teacher-list-title">
+        <div class="admin-list-header">
+          <div>
+            <h2 id="teacher-list-title">登録済みの教師ユーザー</h2>
+            <p>不要な教師ユーザーは、関連するクラス、テスト、生徒、回答、セッションを含めて削除できます。</p>
+          </div>
+          <div class="admin-list-summary" id="teacher-list-summary" aria-live="polite"></div>
+        </div>
+        <div id="teacher-list-message" class="status-message" aria-live="polite"></div>
+        <div id="teacher-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/admin.js"></script>
+</body>
+</html>

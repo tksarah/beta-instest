@@ -1,0 +1,57 @@
+services:
+  app:
+    build:
+      context: ./server
+    image: instanttest-server:latest
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - SQLITE_DB_PATH=/data/data.sqlite
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - APP_BASE_URL=${APP_BASE_URL}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - BETA_FEEDBACK_URL=${BETA_FEEDBACK_URL}
+      - FREE_BETA_CLASS_LIMIT=${FREE_BETA_CLASS_LIMIT}
+      - FREE_BETA_TEST_LIMIT=${FREE_BETA_TEST_LIMIT}
+      - FREE_BETA_STUDENT_LIMIT=${FREE_BETA_STUDENT_LIMIT}
+      - FREE_BETA_AI_GENERATION_LIMIT=${FREE_BETA_AI_GENERATION_LIMIT}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+      - ./server:/app
+      - ./uploads:/app/uploads
+      - server_node_modules:/app/node_modules
+      - ./backups:/backup
+    networks:
+      - web
+
+  caddy:
+    image: caddy:2
+    profiles:
+      - proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+    depends_on:
+      - app
+
+volumes:
+  server_node_modules:
+  caddy_data:
+  caddy_config:
+
+networks:
+  web:
