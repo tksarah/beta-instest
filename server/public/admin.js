@@ -7,6 +7,13 @@
   var featureSettingItems = [];
   var publicSettingItems = [];
   var contactRequestItems = [];
+  var teacherFilters = {
+    query: '',
+    auth: 'all',
+    plan: 'all',
+    ai: 'all',
+    sort: 'created-desc'
+  };
   var dateFormatter = new Intl.DateTimeFormat('ja-JP', {
     year: 'numeric',
     month: '2-digit',
@@ -60,6 +67,11 @@
     el.style.color = isError ? '#900' : '';
   }
 
+  function setText(id, text){
+    var el = $(id);
+    if(el) el.textContent = text;
+  }
+
   function showCreateMessage(text, isError){
     showMessage('teacher-create-message', text, isError);
   }
@@ -97,6 +109,25 @@
     });
   }
 
+  function getPlanCode(item){
+    return item && item.plan ? String(item.plan) : 'free_beta';
+  }
+
+  function getPlanLabel(code){
+    var normalized = String(code || 'free_beta');
+    var plan = planItems.find(function(item){ return item && item.code === normalized; });
+    return plan && plan.display_name ? plan.display_name : normalized;
+  }
+
+  function getTeacherName(item){
+    return String((item && (item.display_name || item.username)) || '');
+  }
+
+  function sortableTime(value){
+    var time = Date.parse(value || '');
+    return Number.isNaN(time) ? 0 : time;
+  }
+
   function getSummary(item){
     var summary = item && item.summary ? item.summary : {};
     return {
@@ -128,22 +159,28 @@
   function renderTeacherSummary(items){
     var host = $('teacher-list-summary');
     if(!host) return;
-    var teacherCount = items.length;
+    var source = teacherItems || [];
+    var teacherCount = source.length;
+    var filteredCount = items.length;
     var testCount = 0;
     var studentCount = 0;
-    items.forEach(function(item){
+    var overrideCount = 0;
+    source.forEach(function(item){
       var summary = getSummary(item);
       testCount += summary.tests;
       studentCount += summary.students;
+      if(item && item.ai_generations_per_month_limit_override != null) overrideCount += 1;
     });
     host.innerHTML = ''
-      + '<span class="admin-pill">教師 ' + teacherCount + '人</span>'
+      + '<span class="admin-pill">表示 ' + filteredCount + ' / ' + teacherCount + '人</span>'
       + '<span class="admin-pill">テスト ' + testCount + '件</span>'
-      + '<span class="admin-pill">生徒 ' + studentCount + '人</span>';
+      + '<span class="admin-pill">生徒 ' + studentCount + '人</span>'
+      + '<span class="admin-pill admin-pill-muted">個別AI上限 ' + overrideCount + '人</span>';
+    renderAdminKpis();
   }
 
   function formatLimitValue(value){
-    return value == null || value === '' ? '無制限' : String(value);
+    return value == null || value === '' ? '' : String(value);
   }
 
   function renderPlanSummary(items){
@@ -179,6 +216,109 @@
     host.innerHTML = ''
       + '<span class="admin-pill">公開設定 ' + count + '件</span>'
       + '<span class="admin-pill">設定済み ' + configuredCount + '件</span>';
+  }
+
+  function renderAdminKpis(){
+    var teacherCount = teacherItems.length;
+    var testCount = 0;
+    var studentCount = 0;
+    teacherItems.forEach(function(item){
+      var summary = getSummary(item);
+      testCount += summary.tests;
+      studentCount += summary.students;
+    });
+
+    var newContactCount = 0;
+    contactRequestItems.forEach(function(item){
+      if(!item || item.status === 'new' || !item.status) newContactCount += 1;
+    });
+
+    setText('admin-kpi-teachers', String(teacherCount));
+    setText('admin-kpi-tests', String(testCount));
+    setText('admin-kpi-students', String(studentCount));
+    setText('admin-kpi-contacts', String(contactRequestItems.length));
+    setText('admin-kpi-teachers-note', planItems.length ? 'プラン ' + planItems.length + '件を利用可能' : 'プランを読み込み中');
+    setText('admin-kpi-contacts-note', newContactCount + '件が新規');
+  }
+
+  function populatePlanFilter(){
+    var filter = $('teacher-plan-filter');
+    if(!filter) return;
+    var current = filter.value || 'all';
+    var seen = {};
+    var options = '<option value="all">すべて</option>';
+    planItems.forEach(function(plan){
+      if(!plan || !plan.code || seen[plan.code]) return;
+      seen[plan.code] = true;
+      options += '<option value="' + escapeHtml(plan.code) + '">' + escapeHtml(plan.display_name || plan.code) + '</option>';
+    });
+    teacherItems.forEach(function(item){
+      var code = getPlanCode(item);
+      if(seen[code]) return;
+      seen[code] = true;
+      options += '<option value="' + escapeHtml(code) + '">' + escapeHtml(code) + '</option>';
+    });
+    filter.innerHTML = options;
+    filter.value = seen[current] || current === 'all' ? current : 'all';
+  }
+
+  function renderPlanOptions(selectedCode){
+    var code = String(selectedCode || 'free_beta');
+    var html = '';
+    var hasSelected = false;
+    planItems.forEach(function(plan){
+      if(!plan || !plan.code) return;
+      var selected = plan.code === code;
+      if(selected) hasSelected = true;
+      html += '<option value="' + escapeHtml(plan.code) + '"' + (selected ? ' selected' : '') + '>' + escapeHtml(plan.display_name || plan.code) + '</option>';
+    });
+    if(!hasSelected){
+      html = '<option value="' + escapeHtml(code) + '" selected>' + escapeHtml(getPlanLabel(code)) + '</option>' + html;
+    }
+    return html;
+  }
+
+  function getFilteredTeacherItems(){
+    var query = String(teacherFilters.query || '').trim().toLowerCase();
+    var items = teacherItems.filter(function(item){
+      var provider = String((item && item.auth_provider) || 'password');
+      var planCode = getPlanCode(item);
+      var hasOverride = item && item.ai_generations_per_month_limit_override != null;
+      var haystack = [
+        item && item.username,
+        item && item.display_name,
+        item && item.email,
+        provider,
+        planCode,
+        getPlanLabel(planCode)
+      ].join(' ').toLowerCase();
+
+      if(query && haystack.indexOf(query) === -1) return false;
+      if(teacherFilters.auth !== 'all' && provider !== teacherFilters.auth) return false;
+      if(teacherFilters.plan !== 'all' && planCode !== teacherFilters.plan) return false;
+      if(teacherFilters.ai === 'override' && !hasOverride) return false;
+      if(teacherFilters.ai === 'plan' && hasOverride) return false;
+      return true;
+    });
+
+    items.sort(function(a, b){
+      var summaryA = getSummary(a);
+      var summaryB = getSummary(b);
+      var usageA = getTeacherUsage(a);
+      var usageB = getTeacherUsage(b);
+      if(teacherFilters.sort === 'created-asc') return sortableTime(a.created_at) - sortableTime(b.created_at);
+      if(teacherFilters.sort === 'usage-desc') return usageB.aiGenerations - usageA.aiGenerations;
+      if(teacherFilters.sort === 'tests-desc') return summaryB.tests - summaryA.tests;
+      if(teacherFilters.sort === 'students-desc') return summaryB.students - summaryA.students;
+      if(teacherFilters.sort === 'name-asc') return getTeacherName(a).localeCompare(getTeacherName(b), 'ja');
+      return sortableTime(b.created_at) - sortableTime(a.created_at);
+    });
+
+    return items;
+  }
+
+  function applyTeacherFilters(){
+    renderTeacherList(getFilteredTeacherItems());
   }
 
   function renderFeatureSettings(items){
@@ -369,7 +509,7 @@
     renderTeacherSummary(items || []);
 
     if(!items || items.length === 0){
-      host.innerHTML = '<div class="admin-empty">教師ユーザーはまだ登録されていません。</div>';
+      host.innerHTML = '<div class="admin-empty">条件に一致する教師ユーザーはありません。</div>';
       return;
     }
 
@@ -379,7 +519,8 @@
       var displayName = item.display_name ? escapeHtml(item.display_name) : '';
       var email = item.email ? escapeHtml(item.email) : '';
       var provider = item.auth_provider ? escapeHtml(item.auth_provider) : 'password';
-      var planLabel = item.plan ? escapeHtml(item.plan) : 'free_beta';
+      var planCode = getPlanCode(item);
+      var planLabel = escapeHtml(getPlanLabel(planCode));
       var usage = getTeacherUsage(item);
       var effectiveLimits = getEffectiveLimits(item);
       var aiLimitOverride = item.ai_generations_per_month_limit_override == null ? '' : String(item.ai_generations_per_month_limit_override);
@@ -390,39 +531,68 @@
         + '  <div class="teacher-card-head">'
         + '    <div class="teacher-card-title">'
         + '      <strong>' + escapeHtml(item.username) + '</strong>'
-        + '      <span class="teacher-display-name">' + (displayName ? '表示名: ' + displayName : '表示名: 未設定') + '</span>'
-        + '      <span>認証: ' + provider + (email ? ' / ' + email : '') + '</span>'
-        + '      <span>プラン: ' + planLabel + '</span>'
-        + '      <span>作成: ' + escapeHtml(formatDate(item.created_at)) + '</span>'
+        + '      <span class="teacher-display-name">' + (displayName ? displayName : '表示名未設定') + '</span>'
         + '    </div>'
-        + '    <button class="btn btn-small btn-danger" data-action="delete" data-id="' + item.id + '" type="button">削除</button>'
-        + '  </div>'
-        + '  <div class="teacher-card-meta">'
-        + '    <div class="teacher-metric"><strong>' + summary.classes + '</strong><span>クラス</span></div>'
-        + '    <div class="teacher-metric"><strong>' + summary.tests + '</strong><span>テスト</span></div>'
-        + '    <div class="teacher-metric"><strong>' + summary.questions + '</strong><span>問題</span></div>'
-        + '    <div class="teacher-metric"><strong>' + summary.students + '</strong><span>生徒</span></div>'
-        + '    <div class="teacher-metric"><strong>' + summary.studentAnswers + '</strong><span>回答</span></div>'
-        + '    <div class="teacher-metric"><strong>' + summary.examSessions + '</strong><span>受験記録</span></div>'
-        + '    <div class="teacher-metric"><strong>' + usage.aiGenerations + ' / ' + escapeHtml(aiEffectiveLimit) + '</strong><span>AI生成/月</span></div>'
-        + '  </div>'
-        + '  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">'
-        + '    <div style="display:flex;gap:8px;align-items:center;flex:1;min-width:260px;">'
-        + '      <input class="edit-display-input" type="text" placeholder="表示名を入力" value="' + displayName + '" style="padding:6px;border-radius:8px;border:1px solid #ddd;flex:1;" />'
-        + '      <button class="btn btn-small" data-action="save-display" data-id="' + item.id + '" type="button">保存</button>'
-        + '    </div>'
-        + '    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-        + '      <input class="teacher-password-input" type="password" placeholder="新しいパスワード" style="padding:6px;border-radius:8px;border:1px solid #ddd;" />'
-        + '      <button class="btn btn-small" data-action="save-password" data-id="' + item.id + '" type="button">パスワード更新</button>'
-        + '    </div>'
-        + '    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-        + '      <label style="display:flex;gap:6px;align-items:center;color:var(--text-muted);font-size:12px;">AI生成/月<input class="teacher-ai-limit-input" type="number" min="0" step="1" placeholder="空欄でプラン既定値" value="' + escapeHtml(aiLimitOverride) + '" style="padding:6px;border-radius:8px;border:1px solid #ddd;width:150px;" /></label>'
-        + '      <span class="admin-pill">' + escapeHtml(aiLimitLabel) + '</span>'
-        + '      <button class="btn btn-small" data-action="save-ai-limit" data-id="' + item.id + '" type="button">AI上限保存</button>'
+        + '    <div class="admin-list-summary">'
+        + '      <span class="admin-pill">' + planLabel + '</span>'
+        + '      <span class="admin-pill admin-pill-muted">' + escapeHtml(provider) + '</span>'
         + '    </div>'
         + '  </div>'
-        + '  <div class="teacher-card-foot">'
-        + '    <p>削除時にはログインセッション ' + summary.teacherSessions + ' 件も同時に消去します。</p>'
+        + '  <div class="teacher-card-body">'
+        + '    <section class="teacher-card-section" aria-label="本人情報">'
+        + '      <h3>本人情報</h3>'
+        + '      <div class="teacher-meta-list">'
+        + '        <span>表示名: <b>' + (displayName || '未設定') + '</b></span>'
+        + '        <span>メール: <b>' + (email || '未登録') + '</b></span>'
+        + '        <span>認証: <b>' + provider + '</b></span>'
+        + '        <span>作成: <b>' + escapeHtml(formatDate(item.created_at)) + '</b></span>'
+        + '      </div>'
+        + '    </section>'
+        + '    <section class="teacher-card-section" aria-label="利用状況">'
+        + '      <h3>利用状況</h3>'
+        + '      <div class="teacher-card-meta">'
+        + '        <div class="teacher-metric"><strong>' + summary.classes + '</strong><span>クラス</span></div>'
+        + '        <div class="teacher-metric"><strong>' + summary.tests + '</strong><span>テスト</span></div>'
+        + '        <div class="teacher-metric"><strong>' + summary.questions + '</strong><span>問題</span></div>'
+        + '        <div class="teacher-metric"><strong>' + summary.students + '</strong><span>生徒</span></div>'
+        + '        <div class="teacher-metric"><strong>' + summary.studentAnswers + '</strong><span>回答</span></div>'
+        + '        <div class="teacher-metric"><strong>' + summary.examSessions + '</strong><span>受験記録</span></div>'
+        + '      </div>'
+        + '    </section>'
+        + '    <section class="teacher-card-section" aria-label="契約と上限">'
+        + '      <h3>契約/上限</h3>'
+        + '      <div class="teacher-support-grid">'
+        + '        <div class="teacher-inline-control">'
+        + '          <label>プラン<select class="teacher-plan-input">' + renderPlanOptions(planCode) + '</select></label>'
+        + '          <button class="btn btn-small" data-action="save-plan-assignment" data-id="' + item.id + '" type="button">保存</button>'
+        + '        </div>'
+        + '        <div class="teacher-inline-control">'
+        + '          <label>AI生成/月<input class="teacher-ai-limit-input" type="number" min="0" step="1" placeholder="空欄でプラン既定値" value="' + escapeHtml(aiLimitOverride) + '" /></label>'
+        + '          <button class="btn btn-small" data-action="save-ai-limit" data-id="' + item.id + '" type="button">保存</button>'
+        + '        </div>'
+        + '        <div class="teacher-meta-list">'
+        + '          <span>実効AI上限: <b>' + usage.aiGenerations + ' / ' + escapeHtml(aiEffectiveLimit) + '</b></span>'
+        + '          <span>上限ソース: <b>' + escapeHtml(aiLimitLabel) + '</b></span>'
+        + '        </div>'
+        + '      </div>'
+        + '    </section>'
+        + '  </div>'
+        + '  <section class="teacher-card-section" aria-label="サポート操作">'
+        + '    <h3>サポート操作</h3>'
+        + '    <div class="teacher-support-grid">'
+        + '      <div class="teacher-inline-control">'
+        + '        <label>表示名<input class="edit-display-input" type="text" placeholder="表示名を入力" value="' + displayName + '" /></label>'
+        + '        <button class="btn btn-small" data-action="save-display" data-id="' + item.id + '" type="button">保存</button>'
+        + '      </div>'
+        + '      <div class="teacher-inline-control">'
+        + '        <label>新しいパスワード<input class="teacher-password-input" type="password" placeholder="6文字以上" /></label>'
+        + '        <button class="btn btn-small" data-action="save-password" data-id="' + item.id + '" type="button">更新</button>'
+        + '      </div>'
+        + '    </div>'
+        + '  </section>'
+        + '  <div class="teacher-danger-zone">'
+        + '    <p>完全削除ではログインセッション ' + summary.teacherSessions + ' 件を含む関連データを削除します。</p>'
+        + '    <button class="btn btn-small btn-danger" data-action="delete" data-id="' + item.id + '" type="button">完全削除</button>'
         + '  </div>'
         + '</article>';
     });
@@ -650,6 +820,35 @@
       });
     });
 
+    host.querySelectorAll('button[data-action="save-plan-assignment"]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-id');
+        var article = btn.closest('article');
+        var input = article ? article.querySelector('.teacher-plan-input') : null;
+        if(!input || !input.value) return;
+
+        btn.disabled = true;
+        showListMessage('プランを保存しています...');
+        apiFetch('/api/admin/teachers/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: input.value })
+        }).then(function(r){
+          btn.disabled = false;
+          if(!r.ok){
+            showListMessage('プラン保存に失敗しました: ' + (((r.body && r.body.error) || r.status)), true);
+            if(r.status === 401) handleInvalidAdminPassword();
+            return;
+          }
+          showListMessage('プランを更新しました。');
+          loadTeachers(true);
+        }).catch(function(){
+          btn.disabled = false;
+          showListMessage('通信に失敗しました', true);
+        });
+      });
+    });
+
     host.querySelectorAll('button[data-action="save-password"]').forEach(function(btn){
       btn.addEventListener('click', function(){
         var id = btn.getAttribute('data-id');
@@ -755,6 +954,54 @@
     redirectToLogin();
   }
 
+  function syncAdminNav(){
+    var hash = String(window.location.hash || '#teachers').replace('#', '') || 'teachers';
+    document.querySelectorAll('[data-admin-nav]').forEach(function(link){
+      var current = link.getAttribute('data-admin-nav') === hash;
+      if(current) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    });
+  }
+
+  function attachTeacherFilters(){
+    var search = $('teacher-search');
+    var auth = $('teacher-auth-filter');
+    var plan = $('teacher-plan-filter');
+    var ai = $('teacher-ai-filter');
+    var sort = $('teacher-sort');
+
+    if(search){
+      search.addEventListener('input', function(){
+        teacherFilters.query = search.value || '';
+        applyTeacherFilters();
+      });
+    }
+    if(auth){
+      auth.addEventListener('change', function(){
+        teacherFilters.auth = auth.value || 'all';
+        applyTeacherFilters();
+      });
+    }
+    if(plan){
+      plan.addEventListener('change', function(){
+        teacherFilters.plan = plan.value || 'all';
+        applyTeacherFilters();
+      });
+    }
+    if(ai){
+      ai.addEventListener('change', function(){
+        teacherFilters.ai = ai.value || 'all';
+        applyTeacherFilters();
+      });
+    }
+    if(sort){
+      sort.addEventListener('change', function(){
+        teacherFilters.sort = sort.value || 'created-desc';
+        applyTeacherFilters();
+      });
+    }
+  }
+
   function loadTeachers(keepMessage){
     if(!getAdminPassword()){
       redirectToLogin();
@@ -770,7 +1017,9 @@
       }
       teacherItems = Array.isArray(r.body) ? r.body : [];
       if(!keepMessage) showListMessage('教師ユーザー ' + teacherItems.length + ' 人を表示しています。');
-      renderTeacherList(teacherItems);
+      populatePlanFilter();
+      applyTeacherFilters();
+      renderAdminKpis();
     }).catch(function(){
       showListMessage('通信に失敗しました。サーバーの状態を確認してください。', true);
     });
@@ -790,7 +1039,10 @@
       }
       planItems = Array.isArray(r.body) ? r.body : [];
       if(!keepMessage) showPlanMessage('プラン設定 ' + planItems.length + ' 件を表示しています。');
+      populatePlanFilter();
       renderPlanList(planItems);
+      applyTeacherFilters();
+      renderAdminKpis();
     }).catch(function(){
       showPlanMessage('通信に失敗しました。サーバーの状態を確認してください。', true);
     });
@@ -853,12 +1105,17 @@
       contactRequestItems = Array.isArray(r.body) ? r.body : [];
       if(!keepMessage) showContactListMessage('お問い合わせ ' + contactRequestItems.length + ' 件を表示しています。');
       renderContactRequestList(contactRequestItems);
+      renderAdminKpis();
     }).catch(function(){
       showContactListMessage('通信に失敗しました。サーバーの状態を確認してください。', true);
     });
   }
 
   var clearBtn = $('admin-clear');
+  attachTeacherFilters();
+  syncAdminNav();
+  window.addEventListener('hashchange', syncAdminNav);
+
   if(clearBtn){
     clearBtn.addEventListener('click', function(){
       clearAdminPassword();
@@ -906,9 +1163,9 @@
     return;
   }
 
+  loadPlans(false);
   loadTeachers(false);
   loadFeatureSettings(false);
   loadPublicSettings(false);
-  loadPlans(false);
   loadContactRequests(false);
 })();
